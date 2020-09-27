@@ -150,10 +150,15 @@ connection.onInitialized(() => {
 
 	connection.onWorkspaceSymbol((params) => {
 		const res: SymbolInformation[] = []
+		let limit = 300
 		for (const [file, blkFile] of files) {
 			for (const blk of blkFile?.blocks ?? [])
-				if (blk.name.indexOf(params.query) != -1)
+				if (blk.name.indexOf(params.query) != -1) {
 					res.push(blkToSymbolInformation(blk, URI.file(file).toString()))
+					limit--
+					if (limit <= 0)
+						return res
+				}
 		}
 		return res
 	})
@@ -168,7 +173,7 @@ connection.onInitialized(() => {
 		if (!blkFile)
 			return null
 
-		const res = getTemplateUnderPos(blkFile, params.position)
+		const res = onDefinition(blkFile, params.position)
 		if (res.error)
 			connection.sendNotification(ShowMessageNotification.type, {
 				type: MessageType.Error,
@@ -190,11 +195,14 @@ connection.onInitialized(() => {
 		if (!blkFile)
 			return null
 
-		const res = getTemplateUnderPos(blkFile, params.position)
-		if (!res || (res.res.length == 0 && !res.error))
+		const res = onDefinition(blkFile, params.position)
+		if (res.res.length == 0 && !res.error)
 			return null
 
-		const text = res.error ? res.error : "Declared in:\n```\n" + res.res.map(it => it.filePath).join("\n") + "\n```"
+		const text = res.error
+			? res.error
+			: ("'" + res.name + "' declared in:\n```\n" + res.res.map(it => `${it.filePath}:${it.location.start.line - 1}`).join("\n") + "\n```")
+		connection.console.log(text)
 		return {
 			contents: {
 				value: text,
@@ -305,7 +313,7 @@ function getTemplates(name: string): TemplatePos[] {
 	return res
 }
 
-function getTemplateUnderPos(blkFile: BlkBlock, position: Position): { res: TemplatePos[], error?: string } {
+function onDefinition(blkFile: BlkBlock, position: Position): { res: TemplatePos[], name?: string, error?: string } {
 	let error = ""
 	for (const blk of blkFile?.blocks ?? []) {
 		for (const param of blk.params) {
@@ -318,7 +326,7 @@ function getTemplateUnderPos(blkFile: BlkBlock, position: Position): { res: Temp
 				name = name.substr(1, name.length - 2)
 			const res = getTemplates(name)
 			if (res.length > 0)
-				return { res: res }
+				return { res: res, name: name }
 			else
 				error = `#undefined template '${name}'`
 		}
