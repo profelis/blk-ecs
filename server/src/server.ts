@@ -73,7 +73,7 @@ documents.listen(connection)
 
 connection.onInitialize((params) => {
 	params.workspaceFolders.forEach(it => addWorkspace(it.uri))
-	connection.console.log(`[Server(${process.pid})] Started and initialize received`)
+	connection.console.log(`blk-ecs started`)
 	return {
 		capabilities: {
 			textDocumentSync: {
@@ -174,7 +174,7 @@ connection.onInitialized(() => {
 				type: MessageType.Error,
 				message: res.error
 			})
-		if (!res || res.error || res.res.length == 0)
+		if (res.error || res.res.length == 0)
 			return null
 
 		return res.res.map(it => {
@@ -210,7 +210,7 @@ connection.onInitialized(() => {
 
 		const pathData = URI.parse(params.textDocument.uri)
 		const res = findAllReferencesAt(pathData.fsPath, blkFile, params.position)
-		if (!res || res.length == 0)
+		if (res.length == 0)
 			return null
 
 		return res.map(it => {
@@ -279,6 +279,7 @@ function scanFile(filePath: string, workspaceUri: string = null): Promise<BlkBlo
 function scanWorkspace(workspaceUri: string) {
 	const pathData = URI.parse(workspaceUri)
 	const path = pathData.fsPath
+	connection.console.log(`scan workspace: ${path}`)
 	walk(path, (err, file) => {
 		if (err != null) {
 			connection.console.log(`walk '${path}' error:`)
@@ -295,7 +296,7 @@ interface TemplatePos {
 	location: BlkLocation
 }
 
-function getTemplate(name: string): TemplatePos[] {
+function getTemplates(name: string): TemplatePos[] {
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
 		for (const blk of blkFile?.blocks ?? [])
@@ -315,7 +316,7 @@ function getTemplateUnderPos(blkFile: BlkBlock, position: Position): { res: Temp
 			let name = param.value[2]
 			if (name.startsWith("\"") && name.endsWith("\""))
 				name = name.substr(1, name.length - 2)
-			const res = getTemplate(name)
+			const res = getTemplates(name)
 			if (res.length > 0)
 				return { res: res }
 			else
