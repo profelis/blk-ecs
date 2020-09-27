@@ -1,0 +1,1 @@
+tspegjs.cmd -o server/src/blk.ts blk.pegjs

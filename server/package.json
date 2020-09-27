@@ -1,0 +1,20 @@
+{
+	"name": "blk-ecs--server",
+	"description": "Simple work with ecs templates",
+	"version": "0.0.1",
+	"author": "Dmitri Granetchi",
+	"license": "MIT",
+	"engines": {
+		"node": "*"
+	},
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/profelis/blk-ecs"
+	},
+	"dependencies": {
+		"vscode-languageserver": "^5.2.1",
+		"pegjs": "0.10.0",
+		"vscode-uri": "2.1.2"
+	},
+	"scripts": {}
+}
