@@ -204,7 +204,7 @@ connection.onInitialized(() => {
 
 		const text = res.error
 			? res.error
-			: ("'" + res.name + "' declared in:\n```\n" + res.res.map(it => `${it.filePath}:${it.location.start.line - 1}`).join("\n") + "\n```")
+			: ("'" + res.name + "' declared in:\n```\n" + res.res.map(it => `${it.filePath}:${it.location.start.line}`).join("\n") + "\n```")
 		connection.console.log(text)
 		return {
 			contents: {
