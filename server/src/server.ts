@@ -110,32 +110,12 @@ function blkToSymbolInformation(blk: BlkBlock, uri: string): SymbolInformation {
 
 function blkToDocumentSymbol(blk: BlkBlock): DocumentSymbol {
 	const range = toRange(blk.location)
-	let children = blk.params ? blk.params.map(it => paramToDocumentSymbol(it)) : null
-	if (blk.blocks?.length ?? 0 > 0) {
-		for (const child of blk.blocks) {
-			if (!child.name.endsWith(namespacePostfix))
-				continue
-			const prefix = child.name.substr(1, child.name.length - namespacePostfix.length - 1) + "."
-			for (const childParam of child.params) {
-				if (children == null)
-					children = []
-				const range = toRange(childParam.location)
-				children.push({
-					name: prefix + childParam.value[0],
-					kind: SymbolKind.Field,
-					range: range,
-					selectionRange: range,
-					detail: childParam.value.length > 2 ? childParam.value[2] : null,
-				})
-			}
-		}
-	}
 	return {
 		name: blk.name,
 		kind: SymbolKind.Struct,
 		range: range,
 		selectionRange: range,
-		children: children,
+		children: blk.params ? blk.params.map(it => paramToDocumentSymbol(it)) : null,
 	}
 }
 
@@ -171,7 +151,7 @@ connection.onInitialized(() => {
 		fileContents.delete(pathData.fsPath)
 	})
 
-	connection.onWorkspaceSymbol((params) => {
+	connection.onWorkspaceSymbol(async (params) => {
 		const res: SymbolInformation[] = []
 		let limit = 300
 		for (const [file, blkFile] of files) {
@@ -279,6 +259,31 @@ function getOrScanFileUri(fileUri: string): Promise<BlkBlock> {
 	return scanFile(pathData.fsPath)
 }
 
+function processFile(blkFile: BlkBlock) {
+	if (!blkFile)
+		return
+
+	for (const blk of blkFile?.blocks ?? []) {
+		if ((blk.blocks?.length ?? 0) == 0)
+			continue
+		for (const child of blk.blocks) {
+			if (!child.name.endsWith(namespacePostfix))
+				continue
+			const prefix = child.name.substr(1, child.name.length - namespacePostfix.length - 1) + "."
+			for (const childParam of child.params) {
+				const newParam = {
+					indent: childParam.indent,
+					location: childParam.location,
+					value: childParam.value.concat([]),
+				}
+				newParam.value[0] = prefix + newParam.value[0]
+				blk.params = blk.params ?? []
+				blk.params.push(newParam)
+			}
+		}
+	}
+}
+
 function scanFile(filePath: string, workspaceUri: string = null): Promise<BlkBlock> {
 	return new Promise(done => {
 		function onFile(err, data) {
@@ -289,6 +294,7 @@ function scanFile(filePath: string, workspaceUri: string = null): Promise<BlkBlo
 			}
 			try {
 				const blk: BlkBlock = parse(data.toString())
+				processFile(blk)
 				if (!workspaceUri || workspaces.has(workspaceUri))
 					files.set(filePath, blk)
 				done(blk)
@@ -368,14 +374,35 @@ function findAllReferences(name: string): TemplatePos[] {
 	return res
 }
 
+function findAllTemplatesWithParam(name: string, type: string): TemplatePos[] {
+	const res: TemplatePos[] = []
+	for (const [filePath, blkFile] of files)
+		for (const blk of blkFile?.blocks ?? [])
+			for (const param of blk.params)
+				if ((param.value?.length ?? 0) > 1 && param.value[0] == name && param.value[1] == type)
+					res.push({ filePath: filePath, location: param.location })
+	return res
+}
+
 function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Position): TemplatePos[] {
 	for (const blk of blkFile?.blocks ?? []) {
-		if (!isPosInLocation(blk.location, position) || position.line != blk.location.start.line - 1)
+		if (!isPosInLocation(blk.location, position))
 			continue
-		const res = findAllReferences(blk.name)
-		if (res.length > 0) {
-			res.splice(0, 0, { filePath: filePath, location: blk.location })
-			return res
+		if (position.line == blk.location.start.line - 1) {
+			const res = findAllReferences(blk.name)
+			if (res.length > 0) {
+				res.splice(0, 0, { filePath: filePath, location: blk.location })
+				return res
+			}
+		}
+		for (const param of blk?.params ?? []) {
+			if ((param.value?.length ?? 0) < 2)
+				continue
+			if (!isPosInLocation(param.location, position))
+				continue
+			const res = findAllTemplatesWithParam(param.value[0], param.value[1])
+			if (res.length > 0)
+				return res
 		}
 	}
 	return []
