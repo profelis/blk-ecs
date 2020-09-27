@@ -65,6 +65,9 @@ interface BlkBlock {
 	params: BlkParam[]
 }
 
+const namespacePostfix = ":_namespace\""
+const extendsField = "_extends"
+
 const connection = createConnection(ProposedFeatures.all)
 const documents = new TextDocuments()
 
@@ -107,12 +110,32 @@ function blkToSymbolInformation(blk: BlkBlock, uri: string): SymbolInformation {
 
 function blkToDocumentSymbol(blk: BlkBlock): DocumentSymbol {
 	const range = toRange(blk.location)
+	let children = blk.params ? blk.params.map(it => paramToDocumentSymbol(it)) : null
+	if (blk.blocks?.length ?? 0 > 0) {
+		for (const child of blk.blocks) {
+			if (!child.name.endsWith(namespacePostfix))
+				continue
+			const prefix = child.name.substr(1, child.name.length - namespacePostfix.length - 1) + "."
+			for (const childParam of child.params) {
+				if (children == null)
+					children = []
+				const range = toRange(childParam.location)
+				children.push({
+					name: prefix + childParam.value[0],
+					kind: SymbolKind.Field,
+					range: range,
+					selectionRange: range,
+					detail: childParam.value.length > 2 ? childParam.value[2] : null,
+				})
+			}
+		}
+	}
 	return {
 		name: blk.name,
 		kind: SymbolKind.Struct,
 		range: range,
 		selectionRange: range,
-		children: blk.params ? blk.params.map(it => paramToDocumentSymbol(it)) : null
+		children: children,
 	}
 }
 
@@ -317,7 +340,7 @@ function onDefinition(blkFile: BlkBlock, position: Position): { res: TemplatePos
 	let error = ""
 	for (const blk of blkFile?.blocks ?? []) {
 		for (const param of blk.params) {
-			if (param.value.length < 3 || param.value[0] != "_extends")
+			if (param.value.length < 3 || param.value[0] != extendsField)
 				continue
 			if (!isPosInLocation(param.location, position))
 				continue
@@ -340,7 +363,7 @@ function findAllReferences(name: string): TemplatePos[] {
 	for (const [filePath, blkFile] of files)
 		for (const blk of blkFile?.blocks ?? [])
 			for (const param of blk.params)
-				if ((param.value?.length ?? 0) > 2 && param.value[0] == "_extends" && (param.value[2] == name || param.value[2] == longName))
+				if ((param.value?.length ?? 0) > 2 && param.value[0] == extendsField && (param.value[2] == name || param.value[2] == longName))
 					res.push({ filePath: filePath, location: param.location })
 	return res
 }
