@@ -267,16 +267,25 @@ function processFile(blkFile: BlkBlock) {
 		if ((blk.blocks?.length ?? 0) == 0)
 			continue
 		for (const child of blk.blocks) {
-			if (!child.name.endsWith(namespacePostfix))
-				continue
-			const prefix = child.name.substr(1, child.name.length - namespacePostfix.length - 1) + "."
-			for (const childParam of child.params) {
-				const newParam = {
-					indent: childParam.indent,
-					location: childParam.location,
-					value: childParam.value.concat([]),
+			if (child.name.endsWith(namespacePostfix)) {
+				const prefix = child.name.substr(1, child.name.length - namespacePostfix.length - 1) + "."
+				for (const childParam of child.params) {
+					const newParam = {
+						indent: childParam.indent,
+						location: childParam.location,
+						value: childParam.value.concat([]),
+					}
+					newParam.value[0] = prefix + newParam.value[0]
+					blk.params = blk.params ?? []
+					blk.params.push(newParam)
 				}
-				newParam.value[0] = prefix + newParam.value[0]
+			} else if (child.name.indexOf(":") != -1) {
+				const parts = removeQuotes(child.name).split(":").map(it => it.trim())
+				const newParam = {
+					indent: { start: { offset: 0, line: 0, column: 0 }, end: { offset: 0, line: 0, column: 0 } },
+					location: child.location,
+					value: parts,
+				}
 				blk.params = blk.params ?? []
 				blk.params.push(newParam)
 			}
@@ -342,6 +351,12 @@ function getTemplates(name: string): TemplatePos[] {
 	return res
 }
 
+function removeQuotes(str: string): string {
+	if (str.startsWith("\"") && str.endsWith("\""))
+		return str.substr(1, str.length - 2)
+	return str
+}
+
 function onDefinition(blkFile: BlkBlock, position: Position): { res: TemplatePos[], name?: string, error?: string } {
 	let error = ""
 	for (const blk of blkFile?.blocks ?? []) {
@@ -350,9 +365,7 @@ function onDefinition(blkFile: BlkBlock, position: Position): { res: TemplatePos
 				continue
 			if (!isPosInLocation(param.location, position))
 				continue
-			let name = param.value[2]
-			if (name.startsWith("\"") && name.endsWith("\""))
-				name = name.substr(1, name.length - 2)
+			const name = removeQuotes(param.value[2])
 			const res = getTemplates(name)
 			if (res.length > 0)
 				return { res: res, name: name }
@@ -368,7 +381,7 @@ function findAllReferences(name: string): TemplatePos[] {
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
 		for (const blk of blkFile?.blocks ?? [])
-			for (const param of blk.params)
+			for (const param of blk?.params ?? [])
 				if ((param.value?.length ?? 0) > 2 && param.value[0] == extendsField && (param.value[2] == name || param.value[2] == longName))
 					res.push({ filePath: filePath, location: param.location })
 	return res
@@ -378,7 +391,7 @@ function findAllTemplatesWithParam(name: string, type: string): TemplatePos[] {
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
 		for (const blk of blkFile?.blocks ?? [])
-			for (const param of blk.params)
+			for (const param of blk?.params ?? [])
 				if ((param.value?.length ?? 0) > 1 && param.value[0] == name && param.value[1] == type)
 					res.push({ filePath: filePath, location: param.location })
 	return res
@@ -386,7 +399,7 @@ function findAllTemplatesWithParam(name: string, type: string): TemplatePos[] {
 
 function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Position): TemplatePos[] {
 	for (const blk of blkFile?.blocks ?? []) {
-		if (!isPosInLocation(blk.location, position))
+		if (!blk.location || !isPosInLocation(blk.location, position))
 			continue
 		if (position.line == blk.location.start.line - 1) {
 			const res = findAllReferences(blk.name)
