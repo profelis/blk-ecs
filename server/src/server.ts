@@ -198,14 +198,13 @@ connection.onInitialized(() => {
 		if (!blkFile)
 			return null
 
-		const res = onDefinition(blkFile, params.position)
+		const res = onDefinition(blkFile, params.position, /*only extends*/true)
 		if (res.res.length == 0 && !res.error)
 			return null
 
 		const text = res.error
 			? res.error
-			: ("'" + res.name + "' declared in:\n```\n" + res.res.map(it => `${it.filePath}:${it.location.start.line}`).join("\n") + "\n```")
-		connection.console.log(text)
+			: ("'" + res.name + "' is declared in:\n```\n" + res.res.map(it => `${it.filePath}:${it.location.start.line}`).join("\n") + "\n```")
 		return {
 			contents: {
 				value: text,
@@ -357,23 +356,30 @@ function removeQuotes(str: string): string {
 	return str
 }
 
-function onDefinition(blkFile: BlkBlock, position: Position): { res: TemplatePos[], name?: string, error?: string } {
-	let error = ""
+function getParamAt(blkFile: BlkBlock, position: Position, depth = 0): { res: BlkParam, depth: number } {
 	for (const blk of blkFile?.blocks ?? []) {
-		for (const param of blk.params) {
-			if (param.value.length < 3 || param.value[0] != extendsField)
-				continue
-			if (!isPosInLocation(param.location, position))
-				continue
-			const name = removeQuotes(param.value[2])
-			const res = getTemplates(name)
-			if (res.length > 0)
-				return { res: res, name: name }
-			else
-				error = `#undefined template '${name}'`
-		}
+		if (isPosInLocation(blk.location, position))
+			return getParamAt(blk, position, ++depth)
 	}
-	return { res: [], error: error.length > 0 ? error : null }
+	for (const param of blkFile?.params ?? []) {
+		if (isPosInLocation(param.location, position))
+			return { res: param, depth: depth }
+	}
+	return null
+}
+
+function onDefinition(blkFile: BlkBlock, position: Position, onlyExtends = false): { res: TemplatePos[], name?: string, error?: string } {
+	const param = getParamAt(blkFile, position)
+	if (param && param.res.value.length >= 3
+		&& (!onlyExtends || (param.depth == 1 && param.res.value[0] == extendsField))) {
+		const name = removeQuotes(param.res.value[2])
+		const res = getTemplates(name)
+		if (res.length > 0)
+			return { res: res, name: name }
+		else
+			return { res: [], error: `#undefined template '${name}'` }
+	}
+	return { res: [] }
 }
 
 function findAllReferences(name: string): TemplatePos[] {

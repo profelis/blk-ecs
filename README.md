@@ -4,8 +4,9 @@
 
 Supported features:
 - go to symbol (global or local)
-- goto parent template
-- find all template usages
+- go to parent template
+- go to any template by string under cursor
+- find all template references
 - find all templates with same parameter
 
 
