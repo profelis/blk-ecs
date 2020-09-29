@@ -379,18 +379,18 @@ function scanFile(filePath: string, workspaceUri: string = null, diagnostic = fa
 					})
 				done(blk)
 			} catch (err) {
-				// if (diagnostic && txt.trim().length > 0) {
-				// 	const location: BlkLocation = <BlkLocation>err.location ?? BlkLocation.create()
-				// 	connection.sendDiagnostics({
-				// 		uri: URI.file(filePath).toString(),
-				// 		diagnostics: [
-				// 			{
-				// 				message: err.message,
-				// 				range: toRange(location)
-				// 			}
-				// 		]
-				// 	})
-				// }
+				if (diagnostic && txt.trim().length > 0) {
+					const location: BlkLocation = <BlkLocation>err.location ?? BlkLocation.create()
+					connection.sendDiagnostics({
+						uri: URI.file(filePath).toString(),
+						diagnostics: [
+							{
+								message: err.message,
+								range: toRange(location)
+							}
+						]
+					})
+				}
 				connection.console.log(`parse file '${filePath}' error:`)
 				connection.console.log(err.message)
 				if (!workspaceUri || workspaces.has(workspaceUri))
