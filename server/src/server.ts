@@ -1,5 +1,5 @@
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, SymbolKind, SymbolInformation, Range, Position, DocumentSymbol, DidSaveTextDocumentNotification, MarkupKind, ShowMessageNotification, MessageType
+	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, SymbolKind, SymbolInformation, Range, Position, DocumentSymbol, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification
 } from 'vscode-languageserver'
 
 import { parse } from './blk'
@@ -12,6 +12,15 @@ interface BlkPosition {
 	line: number
 	column: number
 }
+class BlkPosition {
+	static create(line = 0, column = 0, offset = 0): BlkPosition {
+		return {
+			offset: offset,
+			line: line,
+			column: column,
+		}
+	}
+}
 function toPosition(pos: BlkPosition) {
 	return Position.create(pos.line - 1, pos.column - 1)
 }
@@ -19,6 +28,14 @@ function toPosition(pos: BlkPosition) {
 interface BlkLocation {
 	start: BlkPosition
 	end: BlkPosition
+}
+class BlkLocation {
+	static create(start: BlkPosition = null, end: BlkPosition = null): BlkLocation {
+		return {
+			start: start ?? BlkPosition.create(),
+			end: end ?? BlkPosition.create()
+		}
+	}
 }
 function toRange(loc: BlkLocation) {
 	return Range.create(toPosition(loc.start), toPosition(loc.end))
@@ -80,6 +97,7 @@ connection.onInitialize((params) => {
 	return {
 		capabilities: {
 			textDocumentSync: {
+				openClose: true,
 				change: TextDocumentSyncKind.Full
 			},
 			workspace: {
@@ -92,7 +110,10 @@ connection.onInitialize((params) => {
 			workspaceSymbolProvider: true,
 			definitionProvider: true,
 			hoverProvider: true,
-			referencesProvider: true
+			referencesProvider: true,
+			completionProvider: {
+				resolveProvider: true,
+			},
 		}
 	}
 })
@@ -130,8 +151,15 @@ function paramToDocumentSymbol(param: BlkParam): DocumentSymbol {
 	}
 }
 
+function purgeFile(fileUri: string) {
+	const pathData = URI.parse(fileUri)
+	fileContents.delete(pathData.fsPath)
+	files.delete(pathData.fsPath)
+}
+
 connection.onInitialized(() => {
 	connection.client.register(DidSaveTextDocumentNotification.type, undefined)
+	connection.client.register(DidCloseTextDocumentNotification.type, undefined)
 	// connection.client.register(DidChangeWorkspaceFoldersNotification.type, undefined)
 
 	connection.workspace.onDidChangeWorkspaceFolders((event) => {
@@ -140,15 +168,31 @@ connection.onInitialized(() => {
 	})
 
 	connection.onDidChangeTextDocument(params => {
-		const pathData = URI.parse(params.textDocument.uri)
-		if (params.contentChanges.length > 0)
+		purgeFile(params.textDocument.uri)
+		if (params.contentChanges.length > 0) {
+			const pathData = URI.parse(params.textDocument.uri)
 			fileContents.set(pathData.fsPath, params.contentChanges[0].text)
-		files.delete(pathData.fsPath)
+		}
+		getOrScanFileUri(params.textDocument.uri)
+	})
+
+	connection.onDidOpenTextDocument(params => {
+		purgeFile(params.textDocument.uri)
+		getOrScanFileUri(params.textDocument.uri, true)
 	})
 
 	connection.onDidSaveTextDocument(params => {
-		const pathData = URI.parse(params.textDocument.uri)
-		fileContents.delete(pathData.fsPath)
+		purgeFile(params.textDocument.uri)
+		getOrScanFileUri(params.textDocument.uri, true)
+	})
+
+	connection.onDidCloseTextDocument(params => {
+		purgeFile(params.textDocument.uri)
+		connection.sendDiagnostics({
+			uri: params.textDocument.uri,
+			diagnostics: []
+		})
+		getOrScanFileUri(params.textDocument.uri)
 	})
 
 	connection.onWorkspaceSymbol(async (params) => {
@@ -177,11 +221,11 @@ connection.onInitialized(() => {
 			return null
 
 		const res = onDefinition(blkFile, params.position)
-		if (res.error)
-			connection.sendNotification(ShowMessageNotification.type, {
-				type: MessageType.Error,
-				message: res.error
-			})
+		// if (res.error)
+		// 	connection.sendNotification(ShowMessageNotification.type, {
+		// 		type: MessageType.Error,
+		// 		message: res.error
+		// 	})
 		if (res.error || res.res.length == 0)
 			return null
 
@@ -230,6 +274,12 @@ connection.onInitialized(() => {
 			}
 		})
 	})
+
+	connection.onCompletion(() => {
+		return Array.from(completion.values())
+	})
+
+	connection.onCompletionResolve(params => params)
 })
 
 connection.listen()
@@ -238,6 +288,7 @@ const workspaces: Set<string> = new Set()
 // content of changed files
 const fileContents: Map<string, string> = new Map()
 const files: Map<string, BlkBlock> = new Map()
+const completion: Map<string, CompletionItem> = new Map()
 
 function addWorkspace(workspaceUri: string): void {
 	if (!workspaces.has(workspaceUri))
@@ -250,12 +301,19 @@ function removeWorkspace(workspaceUri: string): void {
 	workspaces.delete(workspaceUri)
 }
 
-function getOrScanFileUri(fileUri: string): Promise<BlkBlock> {
+function getOrScanFileUri(fileUri: string, diagnostic = false): Promise<BlkBlock> {
 	const pathData = URI.parse(fileUri)
 	if (files.has(pathData.fsPath))
 		return Promise.resolve(files.get(pathData.fsPath))
 
-	return scanFile(pathData.fsPath)
+	return scanFile(pathData.fsPath, null, diagnostic)
+}
+
+function addCompletion(name: string, kind: CompletionItemKind) {
+	if ((name?.length ?? 0) == 0)
+		return
+	if (!completion.has(name))
+		completion.set(name, { label: name, kind: kind })
 }
 
 function processFile(blkFile: BlkBlock) {
@@ -263,36 +321,44 @@ function processFile(blkFile: BlkBlock) {
 		return
 
 	for (const blk of blkFile?.blocks ?? []) {
-		if ((blk.blocks?.length ?? 0) == 0)
-			continue
-		for (const child of blk.blocks) {
-			if (child.name.endsWith(namespacePostfix)) {
-				const prefix = child.name.substr(1, child.name.length - namespacePostfix.length - 1) + "."
-				for (const childParam of child.params) {
-					const newParam = {
-						indent: childParam.indent,
-						location: childParam.location,
-						value: childParam.value.concat([]),
+		if ((blk.blocks?.length ?? 0) > 0) {
+			for (const child of blk.blocks) {
+				if (child.name.endsWith(namespacePostfix)) {
+					const prefix = child.name.substr(1, child.name.length - namespacePostfix.length - 1) + "."
+					for (const childParam of child.params) {
+						const newParam = {
+							indent: childParam.indent,
+							location: childParam.location,
+							value: childParam.value.concat([]),
+						}
+						newParam.value[0] = prefix + newParam.value[0]
+						blk.params = blk.params ?? []
+						blk.params.push(newParam)
 					}
-					newParam.value[0] = prefix + newParam.value[0]
+				} else if (child.name.indexOf(":") != -1) {
+					const parts = removeQuotes(child.name).split(":").map(it => it.trim())
+					const newParam = {
+						indent: BlkLocation.create(),
+						location: child.location,
+						value: parts,
+					}
 					blk.params = blk.params ?? []
 					blk.params.push(newParam)
 				}
-			} else if (child.name.indexOf(":") != -1) {
-				const parts = removeQuotes(child.name).split(":").map(it => it.trim())
-				const newParam = {
-					indent: { start: { offset: 0, line: 0, column: 0 }, end: { offset: 0, line: 0, column: 0 } },
-					location: child.location,
-					value: parts,
-				}
-				blk.params = blk.params ?? []
-				blk.params.push(newParam)
 			}
+		}
+		addCompletion(blk.name, CompletionItemKind.Struct)
+		for (const param of blk?.params ?? []) {
+			const len = param.value?.length ?? 0
+			if (len > 1)
+				addCompletion(`${param.value[0]}:${param.value[1]}`, CompletionItemKind.Field)
+			else if (len > 0)
+				addCompletion(param.value[0], CompletionItemKind.Field)
 		}
 	}
 }
 
-function scanFile(filePath: string, workspaceUri: string = null): Promise<BlkBlock> {
+function scanFile(filePath: string, workspaceUri: string = null, diagnostic = false): Promise<BlkBlock> {
 	return new Promise(done => {
 		function onFile(err, data) {
 			if (err != null) {
@@ -300,13 +366,31 @@ function scanFile(filePath: string, workspaceUri: string = null): Promise<BlkBlo
 				connection.console.log(err.message)
 				return
 			}
+			const txt: string = data.toString()
 			try {
-				const blk: BlkBlock = parse(data.toString())
+				const blk: BlkBlock = parse(txt)
 				processFile(blk)
 				if (!workspaceUri || workspaces.has(workspaceUri))
 					files.set(filePath, blk)
+				if (diagnostic)
+					connection.sendDiagnostics({
+						uri: URI.file(filePath).toString(),
+						diagnostics: []
+					})
 				done(blk)
 			} catch (err) {
+				// if (diagnostic && txt.trim().length > 0) {
+				// 	const location: BlkLocation = <BlkLocation>err.location ?? BlkLocation.create()
+				// 	connection.sendDiagnostics({
+				// 		uri: URI.file(filePath).toString(),
+				// 		diagnostics: [
+				// 			{
+				// 				message: err.message,
+				// 				range: toRange(location)
+				// 			}
+				// 		]
+				// 	})
+				// }
 				connection.console.log(`parse file '${filePath}' error:`)
 				connection.console.log(err.message)
 				if (!workspaceUri || workspaces.has(workspaceUri))

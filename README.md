@@ -8,6 +8,7 @@ Supported features:
 - go to any template by string under cursor
 - find all template references
 - find all templates with same parameter
+- autocompletion
 
 
 Especially thanks to [eguskov](https://github.com/eguskov) for his [blktool plugin](https://github.com/eguskov/blktool). Blk grammar syntax was taken from this plugin.
