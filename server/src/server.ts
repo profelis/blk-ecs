@@ -1,5 +1,5 @@
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, SymbolKind, SymbolInformation, Range, Position, DocumentSymbol, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification
+	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, SymbolKind, SymbolInformation, Range, Position, DocumentSymbol, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, PublishDiagnosticsParams, Diagnostic, DiagnosticSeverity
 } from 'vscode-languageserver'
 
 import { parse } from './blk'
@@ -358,6 +358,33 @@ function processFile(blkFile: BlkBlock) {
 	}
 }
 
+
+function validateFile(blkFile: BlkBlock, diagnostics: Diagnostic[]) {
+	if (!blkFile)
+		return
+
+	for (const blk of blkFile?.blocks ?? []) {
+		for (const param of blk?.params ?? []) {
+			const len = param.value?.length ?? 0
+			if (len > 2 && param.value[0] == extendsField && param.value[1] == "t") {
+				const parents = getTemplates(removeQuotes(param.value[2]))
+				if (parents.length == 0)
+					diagnostics.push({
+						message: `Unknown parent template '${param.value[2]}'`,
+						range: toRange(param.location),
+						severity: DiagnosticSeverity.Error,
+					})
+				else if (parents.length > 1)
+					diagnostics.push({
+						message: `Multiple templates '${param.value[2]}'`,
+						range: toRange(param.location),
+						severity: DiagnosticSeverity.Warning,
+					})
+			}
+		}
+	}
+}
+
 function scanFile(filePath: string, workspaceUri: string = null, diagnostic = false): Promise<BlkBlock> {
 	return new Promise(done => {
 		function onFile(err, data) {
@@ -372,27 +399,32 @@ function scanFile(filePath: string, workspaceUri: string = null, diagnostic = fa
 				processFile(blk)
 				if (!workspaceUri || workspaces.has(workspaceUri))
 					files.set(filePath, blk)
-				if (diagnostic)
+				if (diagnostic) {
+					const diagnostics: Diagnostic[] = []
+					validateFile(blk, diagnostics)
 					connection.sendDiagnostics({
 						uri: URI.file(filePath).toString(),
-						diagnostics: []
-					})
-				done(blk)
-			} catch (err) {
-				if (diagnostic && txt.trim().length > 0) {
-					const location: BlkLocation = <BlkLocation>err.location ?? BlkLocation.create()
-					connection.sendDiagnostics({
-						uri: URI.file(filePath).toString(),
-						diagnostics: [
-							{
-								message: err.message,
-								range: toRange(location)
-							}
-						]
+						diagnostics: diagnostics
 					})
 				}
-				connection.console.log(`parse file '${filePath}' error:`)
-				connection.console.log(err.message)
+				done(blk)
+			} catch (err) {
+				if (txt.trim().length > 0) {
+					if (diagnostic) {
+						const location: BlkLocation = <BlkLocation>err.location ?? BlkLocation.create()
+						connection.sendDiagnostics({
+							uri: URI.file(filePath).toString(),
+							diagnostics: [
+								{
+									message: err.message,
+									range: toRange(location)
+								}
+							]
+						})
+					}
+					connection.console.log(`parse file '${filePath}' error:`)
+					connection.console.log(err.message)
+				}
 				if (!workspaceUri || workspaces.has(workspaceUri))
 					files.set(filePath, null)
 				done(null)
@@ -455,7 +487,7 @@ function getParamAt(blkFile: BlkBlock, position: Position, depth = 0): { res: Bl
 function onDefinition(blkFile: BlkBlock, position: Position, onlyExtends = false): { res: TemplatePos[], name?: string, error?: string } {
 	const param = getParamAt(blkFile, position)
 	if (param && param.res.value.length >= 3
-		&& (!onlyExtends || (param.depth == 1 && param.res.value[0] == extendsField))) {
+		&& (!onlyExtends || (param.depth == 1 && param.res.value[0] == extendsField && param.res.value[1] == "t"))) {
 		const name = removeQuotes(param.res.value[2])
 		const res = getTemplates(name)
 		if (res.length > 0)
@@ -472,7 +504,7 @@ function findAllReferences(name: string): TemplatePos[] {
 	for (const [filePath, blkFile] of files)
 		for (const blk of blkFile?.blocks ?? [])
 			for (const param of blk?.params ?? [])
-				if ((param.value?.length ?? 0) > 2 && param.value[0] == extendsField && (param.value[2] == name || param.value[2] == longName))
+				if ((param.value?.length ?? 0) > 2 && param.value[0] == extendsField && param.value[1] == "t" && (param.value[2] == name || param.value[2] == longName))
 					res.push({ filePath: filePath, location: param.location })
 	return res
 }
