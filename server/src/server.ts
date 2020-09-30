@@ -1,5 +1,5 @@
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, SymbolKind, SymbolInformation, Range, Position, DocumentSymbol, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, PublishDiagnosticsParams, Diagnostic, DiagnosticSeverity
+	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, SymbolKind, SymbolInformation, Range, Position, DocumentSymbol, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity
 } from 'vscode-languageserver'
 
 import { parse } from './blk'
@@ -155,6 +155,8 @@ function purgeFile(fileUri: string) {
 	const pathData = URI.parse(fileUri)
 	fileContents.delete(pathData.fsPath)
 	files.delete(pathData.fsPath)
+	completionCacheInvalid = true
+	completion.delete(pathData.fsPath)
 }
 
 connection.onInitialized(() => {
@@ -276,7 +278,16 @@ connection.onInitialized(() => {
 	})
 
 	connection.onCompletion(() => {
-		return Array.from(completion.values())
+		if (completionCacheInvalid) {
+			completionCacheInvalid = false
+			const completionCacheMap: Map<string, CompletionItem> = new Map()
+			for (const file of completion.values())
+				for (const it of file)
+					completionCacheMap.set(it.label, it)
+			completionCache = Array.from(completionCacheMap.values())
+			completionCacheMap.clear()
+		}
+		return completionCache
 	})
 
 	connection.onCompletionResolve(params => params)
@@ -285,10 +296,11 @@ connection.onInitialized(() => {
 connection.listen()
 
 const workspaces: Set<string> = new Set()
-// content of changed files
-const fileContents: Map<string, string> = new Map()
-const files: Map<string, BlkBlock> = new Map()
-const completion: Map<string, CompletionItem> = new Map()
+const fileContents: Map</*fsPath*/string, string> = new Map() // content of changed files
+const files: Map</*fsPath*/string, BlkBlock> = new Map()
+const completion: Map</*fsPath*/string, CompletionItem[]> = new Map()
+let completionCacheInvalid = true
+let completionCache: CompletionItem[] = []
 
 function addWorkspace(workspaceUri: string): void {
 	if (!workspaces.has(workspaceUri))
@@ -309,14 +321,17 @@ function getOrScanFileUri(fileUri: string, diagnostic = false): Promise<BlkBlock
 	return scanFile(pathData.fsPath, null, diagnostic)
 }
 
-function addCompletion(name: string, kind: CompletionItemKind) {
+function addCompletion(filePath: string, name: string, kind: CompletionItemKind) {
 	if ((name?.length ?? 0) == 0)
 		return
-	if (!completion.has(name))
-		completion.set(name, { label: name, kind: kind })
+	const item = { label: name, kind: kind }
+	if (!completion.has(filePath))
+		completion.set(filePath, [item])
+	else
+		completion.get(filePath).push(item)
 }
 
-function processFile(blkFile: BlkBlock) {
+function processFile(filePath: string, blkFile: BlkBlock) {
 	if (!blkFile)
 		return
 
@@ -347,13 +362,13 @@ function processFile(blkFile: BlkBlock) {
 				}
 			}
 		}
-		addCompletion(blk.name, CompletionItemKind.Struct)
+		addCompletion(filePath, blk.name, CompletionItemKind.Struct)
 		for (const param of blk?.params ?? []) {
 			const len = param.value?.length ?? 0
 			if (len > 1)
-				addCompletion(`${param.value[0]}:${param.value[1]}`, CompletionItemKind.Field)
+				addCompletion(filePath, `${param.value[0]}:${param.value[1]}`, CompletionItemKind.Field)
 			else if (len > 0)
-				addCompletion(param.value[0], CompletionItemKind.Field)
+				addCompletion(filePath, param.value[0], CompletionItemKind.Field)
 		}
 	}
 }
@@ -396,7 +411,7 @@ function scanFile(filePath: string, workspaceUri: string = null, diagnostic = fa
 			const txt: string = data.toString()
 			try {
 				const blk: BlkBlock = parse(txt)
-				processFile(blk)
+				processFile(filePath, blk)
 				if (!workspaceUri || workspaces.has(workspaceUri))
 					files.set(filePath, blk)
 				if (diagnostic) {
