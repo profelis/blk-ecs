@@ -374,7 +374,8 @@ function processFile(filePath: string, blkFile: BlkBlock) {
 }
 
 
-function validateFile(blkFile: BlkBlock, diagnostics: Diagnostic[]) {
+function validateFile(filePath: string, blkFile: BlkBlock, diagnostics: Diagnostic[]) {
+	connection.console.log(`> validate '${filePath}'`)
 	if (!blkFile)
 		return
 
@@ -393,7 +394,7 @@ function validateFile(blkFile: BlkBlock, diagnostics: Diagnostic[]) {
 					diagnostics.push({
 						message: `Multiple templates '${param.value[2]}'`,
 						range: toRange(param.location),
-						severity: DiagnosticSeverity.Warning,
+						severity: DiagnosticSeverity.Hint,
 					})
 			}
 		}
@@ -416,7 +417,7 @@ function scanFile(filePath: string, workspaceUri: string = null, diagnostic = fa
 					files.set(filePath, blk)
 				if (diagnostic) {
 					const diagnostics: Diagnostic[] = []
-					validateFile(blk, diagnostics)
+					validateFile(filePath, blk, diagnostics)
 					connection.sendDiagnostics({
 						uri: URI.file(filePath).toString(),
 						diagnostics: diagnostics
