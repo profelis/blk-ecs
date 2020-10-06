@@ -386,19 +386,29 @@ function validateFile(filePath: string, blkFile: BlkBlock, diagnostics: Diagnost
 				const parents = getTemplates(removeQuotes(param.value[2]))
 				if (parents.length == 0)
 					diagnostics.push({
-						message: `Unknown parent template '${param.value[2]}'`,
+						message: `Unknown parent template '${removeQuotes(param.value[2])}'`,
 						range: toRange(param.location),
 						severity: DiagnosticSeverity.Error,
 					})
 				else if (parents.length > 1)
 					diagnostics.push({
-						message: `Multiple templates '${param.value[2]}'`,
+						message: `Multiple templates '${removeQuotes(param.value[2])}'`,
 						range: toRange(param.location),
 						severity: DiagnosticSeverity.Hint,
 					})
 			}
 		}
 	}
+}
+
+function updateDiagnostics(filePath: string, blk: BlkBlock) {
+	const diagnostics: Diagnostic[] = []
+	if (blk)
+		validateFile(filePath, blk, diagnostics)
+	connection.sendDiagnostics({
+		uri: URI.file(filePath).toString(),
+		diagnostics: diagnostics
+	})
 }
 
 function scanFile(filePath: string, workspaceUri: string = null, diagnostic = false): Promise<BlkBlock> {
@@ -409,38 +419,24 @@ function scanFile(filePath: string, workspaceUri: string = null, diagnostic = fa
 				connection.console.log(err.message)
 				return
 			}
-			const txt: string = data.toString()
+			let txt: string = data.toString()
+			if (txt.charCodeAt(0) == 0xFEFF)
+				txt = txt.substr(1)
 			try {
 				const blk: BlkBlock = parse(txt)
 				processFile(filePath, blk)
 				if (!workspaceUri || workspaces.has(workspaceUri))
 					files.set(filePath, blk)
-				if (diagnostic) {
-					const diagnostics: Diagnostic[] = []
-					validateFile(filePath, blk, diagnostics)
-					connection.sendDiagnostics({
-						uri: URI.file(filePath).toString(),
-						diagnostics: diagnostics
-					})
-				}
+				if (diagnostic)
+					updateDiagnostics(filePath, blk)
 				done(blk)
 			} catch (err) {
 				if (txt.trim().length > 0) {
-					if (diagnostic) {
-						const location: BlkLocation = <BlkLocation>err.location ?? BlkLocation.create()
-						connection.sendDiagnostics({
-							uri: URI.file(filePath).toString(),
-							diagnostics: [
-								{
-									message: err.message,
-									range: toRange(location)
-								}
-							]
-						})
-					}
 					connection.console.log(`parse file '${filePath}' error:`)
 					connection.console.log(err.message)
 				}
+				if (diagnostic)
+					updateDiagnostics(filePath, null)
 				if (!workspaceUri || workspaces.has(workspaceUri))
 					files.set(filePath, null)
 				done(null)
