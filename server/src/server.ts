@@ -6,6 +6,7 @@ import { parse } from './blk'
 import { readdir, readFile, stat } from 'fs'
 import { resolve, extname } from 'path'
 import { URI } from 'vscode-uri'
+import { token_set_ratio } from 'fuzzball'
 
 interface BlkPosition {
 	offset: number
@@ -206,7 +207,7 @@ connection.onInitialized(() => {
 		let limit = 300
 		for (const [file, blkFile] of files) {
 			for (const blk of blkFile?.blocks ?? [])
-				if (blk.name.indexOf(params.query) != -1) {
+				if (token_set_ratio(params.query, blk.name) > 0) {
 					res.push(blkToSymbolInformation(blk, URI.file(file).toString()))
 					limit--
 					if (limit <= 0)
