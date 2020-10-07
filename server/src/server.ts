@@ -92,7 +92,7 @@ documents.listen(connection)
 
 
 connection.onInitialize((params) => {
-	params.workspaceFolders.forEach(it => addWorkspace(it.uri))
+	params.workspaceFolders.forEach(it => addWorkspaceUri(it.uri))
 	connection.console.log(`blk-ecs started`)
 	return {
 		capabilities: {
@@ -151,12 +151,11 @@ function paramToDocumentSymbol(param: BlkParam): DocumentSymbol {
 	}
 }
 
-function purgeFile(fileUri: string) {
-	const pathData = URI.parse(fileUri)
-	fileContents.delete(pathData.fsPath)
-	files.delete(pathData.fsPath)
+function purgeFile(fsPath: string) {
+	fileContents.delete(fsPath)
+	files.delete(fsPath)
 	completionCacheInvalid = true
-	completion.delete(pathData.fsPath)
+	completion.delete(fsPath)
 }
 
 connection.onInitialized(() => {
@@ -165,36 +164,41 @@ connection.onInitialized(() => {
 	// connection.client.register(DidChangeWorkspaceFoldersNotification.type, undefined)
 
 	connection.workspace.onDidChangeWorkspaceFolders((event) => {
-		event.added.forEach(it => addWorkspace(it.uri))
-		event.removed.forEach(it => removeWorkspace(it.uri))
+		event.added.forEach(it => addWorkspaceUri(it.uri))
+		event.removed.forEach(it => removeWorkspaceUri(it.uri))
 	})
 
 	connection.onDidChangeTextDocument(params => {
-		purgeFile(params.textDocument.uri)
+		const fsPath = URI.parse(params.textDocument.uri).fsPath
+		purgeFile(fsPath)
 		if (params.contentChanges.length > 0) {
-			const pathData = URI.parse(params.textDocument.uri)
-			fileContents.set(pathData.fsPath, params.contentChanges[0].text)
+			fileContents.set(fsPath, params.contentChanges[0].text)
 		}
-		getOrScanFileUri(params.textDocument.uri)
+		getOrScanFile(fsPath)
 	})
 
 	connection.onDidOpenTextDocument(params => {
-		purgeFile(params.textDocument.uri)
-		getOrScanFileUri(params.textDocument.uri, true)
+		const fsPath = URI.parse(params.textDocument.uri).fsPath
+		purgeFile(fsPath)
+		openFiles.add(fsPath)
+		getOrScanFile(fsPath, true)
 	})
 
 	connection.onDidSaveTextDocument(params => {
-		purgeFile(params.textDocument.uri)
-		getOrScanFileUri(params.textDocument.uri, true)
+		const fsPath = URI.parse(params.textDocument.uri).fsPath
+		purgeFile(fsPath)
+		getOrScanFile(fsPath, true)
 	})
 
 	connection.onDidCloseTextDocument(params => {
-		purgeFile(params.textDocument.uri)
+		const fsPath = URI.parse(params.textDocument.uri).fsPath
+		purgeFile(fsPath)
 		connection.sendDiagnostics({
 			uri: params.textDocument.uri,
 			diagnostics: []
 		})
-		getOrScanFileUri(params.textDocument.uri)
+		openFiles.delete(fsPath)
+		getOrScanFile(fsPath)
 	})
 
 	connection.onWorkspaceSymbol(async (params) => {
@@ -295,30 +299,39 @@ connection.onInitialized(() => {
 
 connection.listen()
 
-const workspaces: Set<string> = new Set()
+const workspaces: Set</*uri*/string> = new Set()
+const openFiles: Set</*fsPath*/string> = new Set()
 const fileContents: Map</*fsPath*/string, string> = new Map() // content of changed files
 const files: Map</*fsPath*/string, BlkBlock> = new Map()
 const completion: Map</*fsPath*/string, CompletionItem[]> = new Map()
 let completionCacheInvalid = true
 let completionCache: CompletionItem[] = []
 
-function addWorkspace(workspaceUri: string): void {
+function addWorkspaceUri(workspaceUri: string): void {
 	if (!workspaces.has(workspaceUri))
 		workspaces.add(workspaceUri)
 
-	scanWorkspace(workspaceUri)
+	scanWorkspaceUri(workspaceUri).finally(() => {
+		connection.console.log("> rescan open files")
+		for (const fsPath of openFiles.values())
+			scanFile(fsPath, null, true)
+	})
 }
 
-function removeWorkspace(workspaceUri: string): void {
+function removeWorkspaceUri(workspaceUri: string): void {
 	workspaces.delete(workspaceUri)
 }
 
 function getOrScanFileUri(fileUri: string, diagnostic = false): Promise<BlkBlock> {
 	const pathData = URI.parse(fileUri)
-	if (files.has(pathData.fsPath))
-		return Promise.resolve(files.get(pathData.fsPath))
+	return getOrScanFile(pathData.fsPath)
+}
 
-	return scanFile(pathData.fsPath, null, diagnostic)
+function getOrScanFile(filePath: string, diagnostic = false): Promise<BlkBlock> {
+	if (files.has(filePath))
+		return Promise.resolve(files.get(filePath))
+
+	return scanFile(filePath, null, diagnostic)
 }
 
 function addCompletion(filePath: string, name: string, kind: CompletionItemKind) {
@@ -374,8 +387,8 @@ function processFile(filePath: string, blkFile: BlkBlock) {
 }
 
 
-function validateFile(filePath: string, blkFile: BlkBlock, diagnostics: Diagnostic[]) {
-	connection.console.log(`> validate '${filePath}'`)
+function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic[]) {
+	connection.console.log(`> validate ${fsPath}`)
 	if (!blkFile)
 		return
 
@@ -401,21 +414,20 @@ function validateFile(filePath: string, blkFile: BlkBlock, diagnostics: Diagnost
 	}
 }
 
-function updateDiagnostics(filePath: string, blk: BlkBlock) {
-	const diagnostics: Diagnostic[] = []
+function updateDiagnostics(fsPath: string, blk: BlkBlock, diagnostics: Diagnostic[] = []) {
 	if (blk)
-		validateFile(filePath, blk, diagnostics)
+		validateFile(fsPath, blk, diagnostics)
 	connection.sendDiagnostics({
-		uri: URI.file(filePath).toString(),
+		uri: URI.file(fsPath).toString(),
 		diagnostics: diagnostics
 	})
 }
 
-function scanFile(filePath: string, workspaceUri: string = null, diagnostic = false): Promise<BlkBlock> {
+function scanFile(fsPath: string, workspaceUri: string = null, diagnostic = false): Promise<BlkBlock> {
 	return new Promise(done => {
 		function onFile(err, data) {
 			if (err != null) {
-				connection.console.log(`read file '${filePath}' error:`)
+				connection.console.log(`read file ${fsPath} error:`)
 				connection.console.log(err.message)
 				return
 			}
@@ -424,38 +436,45 @@ function scanFile(filePath: string, workspaceUri: string = null, diagnostic = fa
 				txt = txt.substr(1)
 			try {
 				const blk: BlkBlock = parse(txt)
-				processFile(filePath, blk)
+				processFile(fsPath, blk)
 				if (!workspaceUri || workspaces.has(workspaceUri))
-					files.set(filePath, blk)
+					files.set(fsPath, blk)
 				if (diagnostic)
-					updateDiagnostics(filePath, blk)
+					updateDiagnostics(fsPath, blk)
 				done(blk)
 			} catch (err) {
+				const diagnostics: Diagnostic[] = []
 				if (txt.trim().length > 0) {
-					connection.console.log(`parse file '${filePath}' error:`)
+					connection.console.log(`parse file ${fsPath} error:`)
 					connection.console.log(err.message)
+					const location: BlkLocation = <BlkLocation>err.location ?? BlkLocation.create()
+					if (diagnostic)
+						diagnostics.push({
+							message: err.message,
+							range: toRange(location),
+							severity: DiagnosticSeverity.Error,
+						})
 				}
 				if (diagnostic)
-					updateDiagnostics(filePath, null)
+					updateDiagnostics(fsPath, null, diagnostics)
 				if (!workspaceUri || workspaces.has(workspaceUri))
-					files.set(filePath, null)
+					files.set(fsPath, null)
 				done(null)
 			}
 		}
-		if (fileContents.has(filePath))
-			onFile(null, fileContents.get(filePath))
+		if (fileContents.has(fsPath))
+			onFile(null, fileContents.get(fsPath))
 		else
-			readFile(filePath, onFile)
+			readFile(fsPath, onFile)
 	})
 }
 
-function scanWorkspace(workspaceUri: string) {
-	const pathData = URI.parse(workspaceUri)
-	const path = pathData.fsPath
-	connection.console.log(`scan workspace: ${path}`)
-	walk(path, (err, file) => {
+function scanWorkspaceUri(workspaceUri: string): Promise<void> {
+	const fsPath = URI.parse(workspaceUri).fsPath
+	connection.console.log(`scan workspace: ${fsPath}`)
+	return walk(fsPath, (err, file) => {
 		if (err != null) {
-			connection.console.log(`walk '${path}' error:`)
+			connection.console.log(`walk ${file ?? fsPath} error:`)
 			connection.console.log(err.message)
 			return
 		}
@@ -555,26 +574,34 @@ function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Posi
 	return []
 }
 
-function walk(dir: string, iter: (err: NodeJS.ErrnoException, path: string) => void) {
-	readdir(dir, function (err, list) {
-		if (err) {
-			iter(err, null)
-			return
-		}
-		for (let file of list) {
-			if (!file) continue
-			file = resolve(dir, file)
-			stat(file, function (err, stat) {
-				if (err) {
-					iter(err, null)
-					return
-				}
-				if (stat && stat.isDirectory()) {
-					walk(file, iter)
-				} else {
-					iter(null, file)
-				}
-			})
-		}
-	})
+function walk(dir: string, iter: (err: NodeJS.ErrnoException, path: string) => void): Promise<void> {
+	return new Promise<void>((done) =>
+		readdir(dir, function (err, list) {
+			if (err) {
+				iter(err, dir)
+				done()
+				return
+			}
+			const promises: Promise<void>[] = []
+			for (let file of list) {
+				if (!file) continue
+				file = resolve(dir, file)
+				stat(file, function (err, stat) {
+					if (err) {
+						iter(err, file)
+						return
+					}
+					if (stat && stat.isDirectory()) {
+						promises.push(walk(file, iter))
+					} else {
+						iter(null, file)
+					}
+				})
+			}
+			if (promises.length == 0)
+				done()
+			else
+				Promise.all(promises).finally(() => done())
+		})
+	)
 }
