@@ -3,7 +3,7 @@ import {
 } from 'vscode-languageserver'
 
 import { parse } from './blk'
-import { readdir, readFile, stat } from 'fs'
+import { readdir, readFile, statSync } from 'fs'
 import { resolve, extname } from 'path'
 import { URI } from 'vscode-uri'
 import { partial_ratio } from 'fuzzball'
@@ -204,7 +204,7 @@ connection.onInitialized(() => {
 
 	connection.onWorkspaceSymbol(async (params) => {
 		const res: SymbolInformation[] = []
-		let limit = 300
+		let limit = 1000
 		for (const [file, blkFile] of files) {
 			for (const blk of blkFile?.blocks ?? [])
 				if (partial_ratio(params.query, blk.name) > 0) {
@@ -313,6 +313,7 @@ function addWorkspaceUri(workspaceUri: string): void {
 		workspaces.add(workspaceUri)
 
 	scanWorkspaceUri(workspaceUri).finally(() => {
+		connection.console.log(`Total files: ${files.size}`)
 		connection.console.log("> rescan open files")
 		for (const fsPath of openFiles.values())
 			scanFile(fsPath, null, true)
@@ -430,6 +431,7 @@ function scanFile(fsPath: string, workspaceUri: string = null, diagnostic = fals
 			if (err != null) {
 				connection.console.log(`read file ${fsPath} error:`)
 				connection.console.log(err.message)
+				done(null)
 				return
 			}
 			let txt: string = data.toString()
@@ -477,10 +479,13 @@ function scanWorkspaceUri(workspaceUri: string): Promise<void> {
 		if (err != null) {
 			connection.console.log(`walk ${file ?? fsPath} error:`)
 			connection.console.log(err.message)
-			return
+			return Promise.resolve()
 		}
-		if (extname(file).toLowerCase() == ".blk")
-			scanFile(file, workspaceUri)
+		if (extname(file).toLowerCase() == ".blk") {
+			connection.console.log(`scan ${file}`)
+			return new Promise<void>(done => scanFile(file, workspaceUri).finally(done))
+		}
+		return Promise.resolve()
 	})
 }
 
@@ -575,34 +580,27 @@ function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Posi
 	return []
 }
 
-function walk(dir: string, iter: (err: NodeJS.ErrnoException, path: string) => void): Promise<void> {
+function walk(dir: string, iter: (err: NodeJS.ErrnoException, path: string) => Promise<void>): Promise<void> {
 	return new Promise<void>((done) =>
 		readdir(dir, function (err, list) {
 			if (err) {
-				iter(err, dir)
-				done()
+				iter(err, dir).finally(done)
 				return
 			}
 			const promises: Promise<void>[] = []
 			for (let file of list) {
 				if (!file) continue
 				file = resolve(dir, file)
-				stat(file, function (err, stat) {
-					if (err) {
-						iter(err, file)
-						return
-					}
-					if (stat && stat.isDirectory()) {
-						promises.push(walk(file, iter))
-					} else {
-						iter(null, file)
-					}
-				})
+				const stat = statSync(file)
+				if (stat && stat.isDirectory())
+					promises.push(walk(file, iter))
+				else
+					promises.push(iter(null, file))
 			}
 			if (promises.length == 0)
 				done()
 			else
-				Promise.all(promises).finally(() => done())
+				Promise.all(promises).finally(done)
 		})
 	)
 }
