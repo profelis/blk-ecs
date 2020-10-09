@@ -1,5 +1,5 @@
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, SymbolKind, SymbolInformation, Range, Position, DocumentSymbol, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity
+	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, SymbolKind, SymbolInformation, Range, Position, DocumentSymbol, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity, DidChangeWorkspaceFoldersNotification
 } from 'vscode-languageserver'
 
 import { parse } from './blk'
@@ -162,7 +162,7 @@ function purgeFile(fsPath: string) {
 connection.onInitialized(() => {
 	connection.client.register(DidSaveTextDocumentNotification.type, undefined)
 	connection.client.register(DidCloseTextDocumentNotification.type, undefined)
-	// connection.client.register(DidChangeWorkspaceFoldersNotification.type, undefined)
+	connection.client.register(DidChangeWorkspaceFoldersNotification.type, undefined)
 
 	connection.workspace.onDidChangeWorkspaceFolders((event) => {
 		event.added.forEach(it => addWorkspaceUri(it.uri))
@@ -300,7 +300,7 @@ connection.onInitialized(() => {
 
 connection.listen()
 
-const workspaces: Set</*uri*/string> = new Set()
+const workspaces: Set</*fsPath*/string> = new Set()
 const openFiles: Set</*fsPath*/string> = new Set()
 const fileContents: Map</*fsPath*/string, string> = new Map() // content of changed files
 const files: Map</*fsPath*/string, BlkBlock> = new Map()
@@ -308,20 +308,49 @@ const completion: Map</*fsPath*/string, CompletionItem[]> = new Map()
 let completionCacheInvalid = true
 let completionCache: CompletionItem[] = []
 
-function addWorkspaceUri(workspaceUri: string): void {
-	if (!workspaces.has(workspaceUri))
-		workspaces.add(workspaceUri)
+function rescanOpenFiles() {
+	connection.console.log("> rescan open files")
+	for (const fsPath of openFiles.values())
+		scanFile(fsPath, null, true)
+}
 
-	scanWorkspaceUri(workspaceUri).finally(() => {
+function addWorkspaceUri(workspaceUri: string): void {
+	const fsPath = URI.parse(workspaceUri).fsPath
+	connection.console.log(`> register workspace ${fsPath}`)
+	if (!workspaces.has(fsPath))
+		workspaces.add(fsPath)
+
+	scanWorkspace(fsPath).finally(() => {
 		connection.console.log(`Total files: ${files.size}`)
-		connection.console.log("> rescan open files")
-		for (const fsPath of openFiles.values())
-			scanFile(fsPath, null, true)
+		rescanOpenFiles()
 	})
 }
 
+function isFileInWorkspaces(fsPath: string) {
+	for (const ws of workspaces.values())
+		if (ws.startsWith(fsPath))
+			return true
+	return false
+}
+
 function removeWorkspaceUri(workspaceUri: string): void {
-	workspaces.delete(workspaceUri)
+	const fsPath = URI.parse(workspaceUri).fsPath
+	connection.console.log(`> unregister workspace ${fsPath}`)
+	workspaces.delete(fsPath)
+
+	if (workspaces.size == 0)
+		files.clear()
+	else {
+		const removeFiles: string[] = []
+		for (const fsPath of openFiles.keys())
+			if (!isFileInWorkspaces(fsPath))
+				removeFiles.push(fsPath)
+		for (const fsPath of removeFiles) {
+			connection.console.log(`> unregister file ${fsPath}`)
+			files.delete(fsPath)
+		}
+	}
+	rescanOpenFiles()
 }
 
 function getOrScanFileUri(fileUri: string, diagnostic = false): Promise<BlkBlock> {
@@ -425,7 +454,7 @@ function updateDiagnostics(fsPath: string, blk: BlkBlock, diagnostics: Diagnosti
 	})
 }
 
-function scanFile(fsPath: string, workspaceUri: string = null, diagnostic = false): Promise<BlkBlock> {
+function scanFile(fsPath: string, workspaceFsPath: string = null, diagnostic = false): Promise<BlkBlock> {
 	return new Promise(done => {
 		function onFile(err, data) {
 			if (err != null) {
@@ -440,7 +469,7 @@ function scanFile(fsPath: string, workspaceUri: string = null, diagnostic = fals
 			try {
 				const blk: BlkBlock = parse(txt)
 				processFile(fsPath, blk)
-				if (!workspaceUri || workspaces.has(workspaceUri))
+				if (!workspaceFsPath || workspaces.has(workspaceFsPath))
 					files.set(fsPath, blk)
 				if (diagnostic)
 					updateDiagnostics(fsPath, blk)
@@ -460,7 +489,7 @@ function scanFile(fsPath: string, workspaceUri: string = null, diagnostic = fals
 				}
 				if (diagnostic)
 					updateDiagnostics(fsPath, null, diagnostics)
-				if (!workspaceUri || workspaces.has(workspaceUri))
+				if (!workspaceFsPath || workspaces.has(workspaceFsPath))
 					files.set(fsPath, null)
 				done(null)
 			}
@@ -472,8 +501,7 @@ function scanFile(fsPath: string, workspaceUri: string = null, diagnostic = fals
 	})
 }
 
-function scanWorkspaceUri(workspaceUri: string): Promise<void> {
-	const fsPath = URI.parse(workspaceUri).fsPath
+function scanWorkspace(fsPath: string): Promise<void> {
 	connection.console.log(`scan workspace: ${fsPath}`)
 	return walk(fsPath, (err, file) => {
 		if (err != null) {
@@ -483,7 +511,7 @@ function scanWorkspaceUri(workspaceUri: string): Promise<void> {
 		}
 		if (extname(file).toLowerCase() == ".blk") {
 			connection.console.log(`scan ${file}`)
-			return new Promise<void>(done => scanFile(file, workspaceUri).finally(done))
+			return new Promise<void>(done => scanFile(file, fsPath).finally(done))
 		}
 		return Promise.resolve()
 	})
