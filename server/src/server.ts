@@ -87,10 +87,6 @@ const namespacePostfix = ":_namespace\""
 const extendsField = "_extends"
 
 const connection = createConnection(ProposedFeatures.all)
-const documents = new TextDocuments()
-
-documents.listen(connection)
-
 
 connection.onInitialize((params) => {
 	params.workspaceFolders.forEach(it => addWorkspaceUri(it.uri))
@@ -227,7 +223,7 @@ connection.onInitialized(() => {
 		if (!blkFile)
 			return null
 
-		const res = onDefinition(blkFile, params.position)
+		const res = onDefinition(params.textDocument.uri, blkFile, params.position)
 		// if (res.error)
 		// 	connection.sendNotification(ShowMessageNotification.type, {
 		// 		type: MessageType.Error,
@@ -249,7 +245,7 @@ connection.onInitialized(() => {
 		if (!blkFile)
 			return null
 
-		const res = onDefinition(blkFile, params.position, /*only extends*/true)
+		const res = onDefinition(params.textDocument.uri, blkFile, params.position, /*only extends*/true)
 		if (res.res.length == 0 && !res.error)
 			return null
 
@@ -532,8 +528,10 @@ function getTemplates(name: string): TemplatePos[] {
 }
 
 function removeQuotes(str: string): string {
-	if (str.startsWith("\"") && str.endsWith("\""))
-		return str.substr(1, str.length - 2)
+	if (str.startsWith("\""))
+		str = str.substr(1, str.length - 1)
+	if (str.endsWith("\""))
+		str = str.substr(0, str.length - 1)
 	return str
 }
 
@@ -549,11 +547,24 @@ function getParamAt(blkFile: BlkBlock, position: Position, depth = 0): { res: Bl
 	return null
 }
 
-function onDefinition(blkFile: BlkBlock, position: Position, onlyExtends = false): { res: TemplatePos[], name?: string, error?: string } {
+function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyExtends = false): { res: TemplatePos[], name?: string, error?: string } {
 	const param = getParamAt(blkFile, position)
 	if (param && param.res.value.length >= 3
 		&& (!onlyExtends || (param.depth == 1 && param.res.value[0] == extendsField && param.res.value[1] == "t"))) {
-		const name = removeQuotes(param.res.value[2])
+		let name = removeQuotes(param.res.value[2])
+		if (name.indexOf("+") > 0) {
+			const parts = param.res.value[2].split("+")
+			let offset = param.res.location.end.column - 1 - position.character
+			while (parts.length > 0) {
+				const last = parts.pop()
+				offset -= last.length
+				if (offset <= 0) {
+					name = removeQuotes(last)
+					break
+				}
+				offset -= 1
+			}
+		}
 		const res = getTemplates(name)
 		if (res.length > 0)
 			return { res: res, name: name }
