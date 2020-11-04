@@ -1,5 +1,5 @@
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, SymbolKind, SymbolInformation, Range, Position, DocumentSymbol, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity, DidChangeWorkspaceFoldersNotification
+	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, SymbolKind, SymbolInformation, Range, Position, DocumentSymbol, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity, DidChangeWorkspaceFoldersNotification, CodeLens
 } from 'vscode-languageserver'
 
 import { parse } from './blk'
@@ -111,6 +111,9 @@ connection.onInitialize((params) => {
 			completionProvider: {
 				resolveProvider: true,
 			},
+			codeLensProvider: {
+				resolveProvider: true,
+			}
 		}
 	}
 })
@@ -151,6 +154,8 @@ function paramToDocumentSymbol(param: BlkParam): DocumentSymbol {
 function purgeFile(fsPath: string) {
 	fileContents.delete(fsPath)
 	files.delete(fsPath)
+	extendsCacheInvalid = true
+	extendsInFiles.delete(fsPath)
 	completionCacheInvalid = true
 	completion.delete(fsPath)
 }
@@ -292,6 +297,33 @@ connection.onInitialized(() => {
 	})
 
 	connection.onCompletionResolve(params => params)
+
+	connection.onCodeLens(async params => {
+		const blkFile = await getOrScanFileUri(params.textDocument.uri)
+		if (!blkFile)
+			return null
+
+		if (extendsCacheInvalid) {
+			extendsCacheInvalid = false
+			extendsMap.clear()
+			for (const fileMap of extendsInFiles.values()) {
+				for (const [key, value] of fileMap) {
+					extendsMap.set(key, (extendsMap.has(key) ? extendsMap.get(key) : 0) + value)
+				}
+			}
+		}
+
+		const res: CodeLens[] = []
+		for (const blk of blkFile?.blocks ?? []) {
+			const name = removeQuotes(blk.name)
+			const count = extendsMap.has(name) ? extendsMap.get(name) : 0
+			const range = toRange(blk.location)
+			res.push({ range: range, command: { title: `${count} usage${count == 1 ? "" : "s"}`, command: null } })
+		}
+		return res
+	})
+
+	connection.onCodeLensResolve(params => params)
 })
 
 connection.listen()
@@ -300,6 +332,11 @@ const workspaces: Set</*fsPath*/string> = new Set()
 const openFiles: Set</*fsPath*/string> = new Set()
 const fileContents: Map</*fsPath*/string, string> = new Map() // content of changed files
 const files: Map</*fsPath*/string, BlkBlock> = new Map()
+
+const extendsInFiles: Map<string, Map<string, number>> = new Map()
+let extendsCacheInvalid = true
+const extendsMap: Map<string, number> = new Map()
+
 const completion: Map</*fsPath*/string, CompletionItem[]> = new Map()
 let completionCacheInvalid = true
 let completionCache: CompletionItem[] = []
@@ -364,6 +401,7 @@ function getOrScanFile(filePath: string, diagnostic = false): Promise<BlkBlock> 
 function addCompletion(filePath: string, name: string, kind: CompletionItemKind) {
 	if ((name?.length ?? 0) == 0)
 		return
+	completionCacheInvalid = true
 	const item = { label: name, kind: kind }
 	if (!completion.has(filePath))
 		completion.set(filePath, [item])
@@ -371,10 +409,13 @@ function addCompletion(filePath: string, name: string, kind: CompletionItemKind)
 		completion.get(filePath).push(item)
 }
 
-function processFile(filePath: string, blkFile: BlkBlock) {
+function processFile(fsPath: string, blkFile: BlkBlock) {
 	if (!blkFile)
 		return
 
+	const extendsInFile: Map<string, number> = new Map()
+	extendsInFiles.set(fsPath, extendsInFile)
+	extendsCacheInvalid = true
 	for (const blk of blkFile?.blocks ?? []) {
 		if ((blk.blocks?.length ?? 0) > 0) {
 			for (const child of blk.blocks) {
@@ -402,13 +443,17 @@ function processFile(filePath: string, blkFile: BlkBlock) {
 				}
 			}
 		}
-		addCompletion(filePath, blk.name, CompletionItemKind.Struct)
+		addCompletion(fsPath, blk.name, CompletionItemKind.Struct)
 		for (const param of blk?.params ?? []) {
 			const len = param.value?.length ?? 0
+			if (len > 2 && param.value[0] == extendsField && param.value[1] == "t") {
+				const parentName = removeQuotes(param.value[2])
+				extendsInFile.set(parentName, extendsInFile.has(parentName) ? extendsInFile.get(parentName) + 1 : 1)
+			}
 			if (len > 1)
-				addCompletion(filePath, `${param.value[0]}:${param.value[1]}`, CompletionItemKind.Field)
+				addCompletion(fsPath, `${param.value[0]}:${param.value[1]}`, CompletionItemKind.Field)
 			else if (len > 0)
-				addCompletion(filePath, param.value[0], CompletionItemKind.Field)
+				addCompletion(fsPath, param.value[0], CompletionItemKind.Field)
 		}
 	}
 }
@@ -423,16 +468,17 @@ function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic
 		for (const param of blk?.params ?? []) {
 			const len = param.value?.length ?? 0
 			if (len > 2 && param.value[0] == extendsField && param.value[1] == "t") {
-				const parents = getTemplates(removeQuotes(param.value[2]))
+				const parentName = removeQuotes(param.value[2])
+				const parents = getTemplates(parentName)
 				if (parents.length == 0)
 					diagnostics.push({
-						message: `Unknown parent template '${removeQuotes(param.value[2])}'`,
+						message: `Unknown parent template '${parentName}'`,
 						range: toRange(param.location),
 						severity: DiagnosticSeverity.Error,
 					})
 				else if (parents.length > 1)
 					diagnostics.push({
-						message: `Multiple templates '${removeQuotes(param.value[2])}'`,
+						message: `Multiple templates '${parentName}'`,
 						range: toRange(param.location),
 						severity: DiagnosticSeverity.Hint,
 					})
