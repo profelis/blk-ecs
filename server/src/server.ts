@@ -204,24 +204,19 @@ connection.onInitialized(() => {
 	})
 
 	connection.onWorkspaceSymbol(async (params) => {
-		const res: SymbolInformation[] = []
-		let limit = 1000
 		const data: Array<{ file: string; blk: BlkBlock }> = []
 		for (const [file, blkFile] of files) {
 			for (const blk of blkFile?.blocks ?? [])
 				data.push({ file: file, blk: blk })
 		}
-		const scores = await extractAsPromised(params.query, data, { processor: (it) => it.blk.name })
-		for (const [it, ratio] of scores) {
-			if (ratio > 30) {
-				res.push(blkToSymbolInformation(it.blk, URI.file(it.file).toString()))
-				// connection.console.log(`>> ${it.blk.name} from ${it.file} at ${JSON.stringify(it.blk.location)} ratio: ${ratio}`)
-				limit--
-				if (limit <= 0)
-					break
-			}
+
+		const scores = await extractAsPromised(params.query, data, { processor: (it) => it.blk.name, limit: 1000, cutoff: 20 })
+		const res: SymbolInformation[] = []
+		for (const [it] of scores) {
+			res.push(blkToSymbolInformation(it.blk, URI.file(it.file).toString()))
+			// connection.console.log(`>> ${it.blk.name} from ${it.file} at ${JSON.stringify(it.blk.location)} ratio: ${ratio}`)
 		}
-		connection.console.log(`workspace symbols ${res.length} in ${files.size} files. limit ${limit}/1000`)
+		connection.console.log(`workspace symbols ${res.length} in ${files.size} files`)
 		return res
 	})
 
