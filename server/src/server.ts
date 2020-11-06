@@ -216,10 +216,10 @@ connection.onInitialized(() => {
 			if (ratio > 30) {
 				res.push(blkToSymbolInformation(it.blk, URI.file(it.file).toString()))
 				// connection.console.log(`>> ${it.blk.name} from ${it.file} at ${JSON.stringify(it.blk.location)} ratio: ${ratio}`)
-					limit--
-					if (limit <= 0)
+				limit--
+				if (limit <= 0)
 					break
-				}
+			}
 		}
 		connection.console.log(`workspace symbols ${res.length} in ${files.size} files. limit ${limit}/1000`)
 		return res
@@ -416,9 +416,29 @@ function addCompletion(filePath: string, name: string, kind: CompletionItemKind)
 		completion.get(filePath).push(item)
 }
 
+function cleanupBlkParam(param: BlkParam) {
+	if (!param)
+		return
+	param.indent = null
+}
+
+function cleanupBlkBlock(blk: BlkBlock) {
+	if (!blk)
+		return
+	blk.comments = null
+	blk.emptyLines = null
+	blk.includes = null
+	for (const param of blk?.params ?? [])
+		cleanupBlkParam(param)
+	for (const it of blk?.blocks ?? [])
+		cleanupBlkBlock(it)
+}
+
 function processFile(fsPath: string, blkFile: BlkBlock) {
 	if (!blkFile)
 		return
+
+	cleanupBlkBlock(blkFile)
 
 	const extendsInFile: Map<string, number> = new Map()
 	extendsInFiles.set(fsPath, extendsInFile)
