@@ -6,7 +6,7 @@ import { parse } from './blk'
 import { readdir, readFile, statSync } from 'fs'
 import { resolve, extname } from 'path'
 import { URI } from 'vscode-uri'
-import { partial_ratio } from 'fuzzball'
+import { extractAsPromised } from 'fuzzball'
 
 interface BlkPosition {
 	offset: number
@@ -206,15 +206,22 @@ connection.onInitialized(() => {
 	connection.onWorkspaceSymbol(async (params) => {
 		const res: SymbolInformation[] = []
 		let limit = 1000
+		const data: Array<{ file: string; blk: BlkBlock }> = []
 		for (const [file, blkFile] of files) {
 			for (const blk of blkFile?.blocks ?? [])
-				if (partial_ratio(params.query, blk.name) > 0) {
-					res.push(blkToSymbolInformation(blk, URI.file(file).toString()))
+				data.push({ file: file, blk: blk })
+		}
+		const scores = await extractAsPromised(params.query, data, { processor: (it) => it.blk.name })
+		for (const [it, ratio] of scores) {
+			if (ratio > 30) {
+				res.push(blkToSymbolInformation(it.blk, URI.file(it.file).toString()))
+				// connection.console.log(`>> ${it.blk.name} from ${it.file} at ${JSON.stringify(it.blk.location)} ratio: ${ratio}`)
 					limit--
 					if (limit <= 0)
-						return res
+					break
 				}
 		}
+		connection.console.log(`workspace symbols ${res.length} in ${files.size} files. limit ${limit}/1000`)
 		return res
 	})
 
