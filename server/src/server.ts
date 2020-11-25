@@ -86,6 +86,9 @@ interface BlkBlock {
 const namespacePostfix = ":_namespace\""
 const extendsField = "_extends"
 
+const entityWithTemplateName = "entity"
+const templateField = "_template"
+
 const connection = createConnection(ProposedFeatures.all)
 
 connection.onInitialize((params) => {
@@ -156,6 +159,8 @@ function purgeFile(fsPath: string) {
 	files.delete(fsPath)
 	extendsCacheInvalid = true
 	extendsInFiles.delete(fsPath)
+	entitiesInScenesInvalid = true
+	entitiesInScenes.delete(fsPath)
 	completionCacheInvalid = true
 	completion.delete(fsPath)
 }
@@ -305,12 +310,22 @@ connection.onInitialized(() => {
 		if (!blkFile)
 			return null
 
+		if (extendsCacheInvalid || entitiesInScenesInvalid)
+			usagesMap.clear()
+
 		if (extendsCacheInvalid) {
 			extendsCacheInvalid = false
-			extendsMap.clear()
 			for (const fileMap of extendsInFiles.values()) {
 				for (const [key, value] of fileMap) {
-					extendsMap.set(key, (extendsMap.has(key) ? extendsMap.get(key) : 0) + value)
+					usagesMap.set(key, (usagesMap.has(key) ? usagesMap.get(key) : 0) + value)
+				}
+			}
+		}
+		if (entitiesInScenesInvalid) {
+			entitiesInScenesInvalid = false
+			for (const fileMap of entitiesInScenes.values()) {
+				for (const [key, value] of fileMap) {
+					usagesMap.set(key, (usagesMap.has(key) ? usagesMap.get(key) : 0) + value)
 				}
 			}
 		}
@@ -318,7 +333,7 @@ connection.onInitialized(() => {
 		const res: CodeLens[] = []
 		for (const blk of blkFile?.blocks ?? []) {
 			const name = removeQuotes(blk.name)
-			const count = extendsMap.has(name) ? extendsMap.get(name) : 0
+			const count = usagesMap.has(name) ? usagesMap.get(name) : 0
 			const range = toRange(blk.location)
 			res.push({ range: range, command: { title: `${count} usage${count == 1 ? "" : "s"}`, command: null } })
 		}
@@ -337,7 +352,9 @@ const files: Map</*fsPath*/string, BlkBlock> = new Map()
 
 const extendsInFiles: Map<string, Map<string, number>> = new Map()
 let extendsCacheInvalid = true
-const extendsMap: Map<string, number> = new Map()
+const entitiesInScenes: Map<string, Map<string, number>> = new Map()
+let entitiesInScenesInvalid = true
+const usagesMap: Map<string, number> = new Map()
 
 const completion: Map</*fsPath*/string, CompletionItem[]> = new Map()
 let completionCacheInvalid = true
@@ -436,8 +453,7 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 	cleanupBlkBlock(blkFile)
 
 	const extendsInFile: Map<string, number> = new Map()
-	extendsInFiles.set(fsPath, extendsInFile)
-	extendsCacheInvalid = true
+	const entitiesInScene: Map<string, number> = new Map()
 	for (const blk of blkFile?.blocks ?? []) {
 		if ((blk.blocks?.length ?? 0) > 0) {
 			for (const child of blk.blocks) {
@@ -466,6 +482,16 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 			}
 		}
 		addCompletion(fsPath, blk.name, CompletionItemKind.Struct)
+		if (blk.name == entityWithTemplateName) {
+			for (const param of blk?.params ?? [])
+				if ((param.value?.length ?? 0) > 2 && param.value[0] == templateField && param.value[1] == "t") {
+					const parts = param.value[2].split("+")
+					for (const part of parts) {
+						const partName = removeQuotes(part)
+						entitiesInScene.set(partName, entitiesInScene.has(partName) ? entitiesInScene.get(partName) + 1 : 1)
+					}
+				}
+		}
 		for (const param of blk?.params ?? []) {
 			const len = param.value?.length ?? 0
 			if (len > 2 && param.value[0] == extendsField && param.value[1] == "t") {
@@ -477,6 +503,14 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 			else if (len > 0)
 				addCompletion(fsPath, param.value[0], CompletionItemKind.Field)
 		}
+	}
+	if (extendsInFile.size > 0) {
+		extendsInFiles.set(fsPath, extendsInFile)
+		extendsCacheInvalid = true
+	}
+	if (entitiesInScene.size > 0) {
+		entitiesInScenes.set(fsPath, entitiesInScene)
+		entitiesInScenesInvalid = true
 	}
 }
 
@@ -646,10 +680,25 @@ function findAllReferences(name: string): TemplatePos[] {
 	const longName = "\"" + name + "\""
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
-		for (const blk of blkFile?.blocks ?? [])
+		for (const blk of blkFile?.blocks ?? []) {
+			if (blk.name == entityWithTemplateName) {
+				for (const param of blk?.params ?? []) {
+					if ((param.value?.length ?? 0) > 2 && param.value[0] == templateField && param.value[1] == "t") {
+						const parts = param.value[2].split("+")
+						for (const part of parts) {
+							const partName = removeQuotes(part)
+							if (partName != name)
+								continue
+							res.push({ filePath: filePath, location: param.location })
+							break
+						}
+					}
+				}
+			}
 			for (const param of blk?.params ?? [])
 				if ((param.value?.length ?? 0) > 2 && param.value[0] == extendsField && param.value[1] == "t" && (param.value[2] == name || param.value[2] == longName))
 					res.push({ filePath: filePath, location: param.location })
+		}
 	return res
 }
 
