@@ -659,25 +659,36 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 	const param = getParamAt(blkFile, position)
 	if (param && param.res.value.length >= 3
 		&& (!onlyExtends || (param.depth == 1 && param.res.value[0] == extendsField && param.res.value[1] == "t"))) {
-		let name = removeQuotes(param.res.value[2])
-		if (name.indexOf("+") > 0) {
-			const parts = param.res.value[2].split("+")
-			let offset = param.res.location.end.column - 1 - position.character
-			while (parts.length > 0) {
-				const last = parts.pop()
-				offset -= last.length
-				if (offset <= 0) {
-					name = removeQuotes(last)
-					break
+		const startOffset =  (param.res.value[0].length + param.res.value[1].length + param.res.value[2].length) - (param.res.location.end.column - 1 - position.character)
+		let name = ""
+		if (startOffset > param.res.value[0].length) {
+			name = removeQuotes(param.res.value[2])
+			if (name.indexOf("+") > 0) {
+				const parts = param.res.value[2].split("+")
+				let offset = param.res.location.end.column - 1 - position.character
+				while (parts.length > 0) {
+					const last = parts.pop()
+					offset -= last.length
+					if (offset <= 0) {
+						name = removeQuotes(last)
+						break
+					}
+					offset -= 1
 				}
-				offset -= 1
 			}
-		}
-		const res = getTemplates(name)
-		if (res.length > 0)
-			return { res: res, name: name }
-		else
+			const res = getTemplates(name)
+			if (res.length > 0)
+				return { res: res, name: name }
+
 			return { res: [], error: `#undefined template '${name}'` }
+		}
+
+		name = param.res.value[0]
+		const nameRes = getTemplates(name)
+		if (nameRes.length > 0)
+			return { res: nameRes, name: param.res.value[0] }
+
+		return { res: [], error: `#undefined template '${name}'` }
 	}
 	return { res: [] }
 }
