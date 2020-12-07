@@ -525,6 +525,12 @@ function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic
 			const len = param.value?.length ?? 0
 			if (len > 2 && param.value[0] == extendsField && param.value[1] == "t") {
 				const parentName = removeQuotes(param.value[2])
+				if (parentName == blk.name)
+					diagnostics.push({
+						message: `Recursively dependency '${parentName}'`,
+						range: toRange(param.location),
+						severity: DiagnosticSeverity.Error,
+					})
 				const parents = getTemplates(parentName)
 				if (parents.length == 0)
 					diagnostics.push({
