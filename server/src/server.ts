@@ -177,11 +177,10 @@ connection.onInitialized(() => {
 
 	connection.onDidChangeTextDocument(params => {
 		const fsPath = URI.parse(params.textDocument.uri).fsPath
-		purgeFile(fsPath)
 		if (params.contentChanges.length > 0) {
 			fileContents.set(fsPath, params.contentChanges[0].text)
 		}
-		getOrScanFile(fsPath)
+		scanFile(fsPath, null, false, true)
 	})
 
 	connection.onDidOpenTextDocument(params => {
@@ -451,6 +450,9 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 		return
 
 	cleanupBlkBlock(blkFile)
+	completion.delete(fsPath)
+	extendsInFiles.delete(fsPath)
+	entitiesInScenes.delete(fsPath)
 
 	const extendsInFile: Map<string, number> = new Map()
 	const entitiesInScene: Map<string, number> = new Map()
@@ -504,14 +506,12 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 				addCompletion(fsPath, param.value[0], CompletionItemKind.Field)
 		}
 	}
-	if (extendsInFile.size > 0) {
+	if (extendsInFile.size > 0)
 		extendsInFiles.set(fsPath, extendsInFile)
-		extendsCacheInvalid = true
-	}
-	if (entitiesInScene.size > 0) {
+	extendsCacheInvalid = true
+	if (entitiesInScene.size > 0)
 		entitiesInScenes.set(fsPath, entitiesInScene)
-		entitiesInScenesInvalid = true
-	}
+	entitiesInScenesInvalid = true
 }
 
 
@@ -552,7 +552,7 @@ function updateDiagnostics(fsPath: string, blk: BlkBlock, diagnostics: Diagnosti
 	})
 }
 
-function scanFile(fsPath: string, workspaceFsPath: string = null, diagnostic = false): Promise<BlkBlock> {
+function scanFile(fsPath: string, workspaceFsPath: string = null, diagnostic = false, lazy = false): Promise<BlkBlock> {
 	return new Promise(done => {
 		function onFile(err, data) {
 			if (err != null) {
@@ -587,7 +587,7 @@ function scanFile(fsPath: string, workspaceFsPath: string = null, diagnostic = f
 				}
 				if (diagnostic)
 					updateDiagnostics(fsPath, null, diagnostics)
-				if (!workspaceFsPath || workspaces.has(workspaceFsPath))
+				if (!lazy && (!workspaceFsPath || workspaces.has(workspaceFsPath)))
 					files.set(fsPath, null)
 				done(null)
 			}
