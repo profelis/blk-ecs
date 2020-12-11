@@ -1,87 +1,15 @@
 import {
-	createConnection, TextDocuments, ProposedFeatures, TextDocumentSyncKind, SymbolKind, SymbolInformation, Range, Position, DocumentSymbol, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity, DidChangeWorkspaceFoldersNotification, CodeLens
+	createConnection, ProposedFeatures, TextDocumentSyncKind, SymbolInformation, Position, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity, DidChangeWorkspaceFoldersNotification, CodeLens
 } from 'vscode-languageserver'
 
 import { parse } from './blk'
-import { readdir, readFile, statSync } from 'fs'
-import { resolve, extname } from 'path'
+import { readFile } from 'fs'
+import { extname } from 'path'
 import { URI } from 'vscode-uri'
 import { extractAsPromised } from 'fuzzball'
+import { walk } from './fsUtils'
+import { BlkBlock, BlkParam, toRange, isPosInLocation, BlkLocation, blkToSymbolInformation, blkToDocumentSymbol } from './blkBlock'
 
-interface BlkPosition {
-	offset: number
-	line: number
-	column: number
-}
-class BlkPosition {
-	static create(line = 0, column = 0, offset = 0): BlkPosition {
-		return {
-			offset: offset,
-			line: line,
-			column: column,
-		}
-	}
-}
-function toPosition(pos: BlkPosition) {
-	return Position.create(pos.line - 1, pos.column - 1)
-}
-
-interface BlkLocation {
-	start: BlkPosition
-	end: BlkPosition
-}
-class BlkLocation {
-	static create(start: BlkPosition = null, end: BlkPosition = null): BlkLocation {
-		return {
-			start: start ?? BlkPosition.create(),
-			end: end ?? BlkPosition.create()
-		}
-	}
-}
-function toRange(loc: BlkLocation) {
-	return Range.create(toPosition(loc.start), toPosition(loc.end))
-}
-function isPosInLocation(location: BlkLocation, position: { line: number, character: number }) {
-	if (position.line < location.start.line - 1 ||
-		(position.line == location.start.line - 1 && position.character < location.start.column - 1))
-		return false
-	if (position.line > location.end.line - 1 ||
-		(position.line == location.end.line - 1 && position.character > location.end.column - 1))
-		return false
-	return true
-}
-
-interface BlkComment {
-	indent: BlkLocation
-	location: BlkLocation
-	value: string
-	format: 'line' | 'block'
-}
-
-interface BlkEmptyLine {
-	location: BlkLocation
-}
-
-interface BlkIncludes {
-	location: BlkLocation
-	value: string
-}
-
-interface BlkParam {
-	indent: BlkLocation
-	location: BlkLocation
-	value: string[]
-}
-
-interface BlkBlock {
-	blocks: BlkBlock[]
-	comments: BlkComment[]
-	emptyLines: BlkEmptyLine[]
-	includes: BlkIncludes[]
-	location: BlkLocation
-	name: string
-	params: BlkParam[]
-}
 
 const namespacePostfix = ":_namespace\""
 const extendsField = "_extends"
@@ -121,38 +49,6 @@ connection.onInitialize((params) => {
 	}
 })
 
-function blkToSymbolInformation(blk: BlkBlock, uri: string): SymbolInformation {
-	return {
-		name: blk.name,
-		kind: SymbolKind.Struct,
-		location: {
-			uri: uri,
-			range: toRange(blk.location)
-		}
-	}
-}
-
-function blkToDocumentSymbol(blk: BlkBlock): DocumentSymbol {
-	const range = toRange(blk.location)
-	return {
-		name: blk.name,
-		kind: SymbolKind.Struct,
-		range: range,
-		selectionRange: range,
-		children: blk.params ? blk.params.map(it => paramToDocumentSymbol(it)) : null,
-	}
-}
-
-function paramToDocumentSymbol(param: BlkParam): DocumentSymbol {
-	const range = toRange(param.location)
-	return {
-		name: param.value[0],
-		kind: SymbolKind.Field,
-		range: range,
-		selectionRange: range,
-		detail: param.value.length > 2 ? param.value[2] : null,
-	}
-}
 
 function purgeFile(fsPath: string) {
 	fileContents.delete(fsPath)
@@ -220,7 +116,6 @@ connection.onInitialized(() => {
 			res.push(blkToSymbolInformation(it.blk, URI.file(it.file).toString()))
 			// connection.console.log(`>> ${it.blk.name} from ${it.file} at ${JSON.stringify(it.blk.location)} ratio: ${ratio}`)
 		}
-		connection.console.log(`workspace symbols ${res.length} in ${files.size} files`)
 		return res
 	})
 
@@ -234,12 +129,7 @@ connection.onInitialized(() => {
 		if (!blkFile)
 			return null
 
-		const res = onDefinition(params.textDocument.uri, blkFile, params.position)
-		// if (res.error)
-		// 	connection.sendNotification(ShowMessageNotification.type, {
-		// 		type: MessageType.Error,
-		// 		message: res.error
-		// 	})
+		const res = onDefinition(blkFile, params.position)
 		if (res.error || res.res.length == 0)
 			return null
 
@@ -256,7 +146,7 @@ connection.onInitialized(() => {
 		if (!blkFile)
 			return null
 
-		const res = onDefinition(params.textDocument.uri, blkFile, params.position, /*only extends*/true)
+		const res = onDefinition(blkFile, params.position, /*only extends*/true)
 		if (res.res.length == 0 && !res.error)
 			return null
 
@@ -404,16 +294,10 @@ function removeWorkspaceUri(workspaceUri: string): void {
 	rescanOpenFiles()
 }
 
-function getOrScanFileUri(fileUri: string, diagnostic = false): Promise<BlkBlock> {
-	const pathData = URI.parse(fileUri)
-	return getOrScanFile(pathData.fsPath)
-}
+function getOrScanFileUri(fileUri: string): Promise<BlkBlock> { return getOrScanFile(URI.parse(fileUri).fsPath) }
 
 function getOrScanFile(filePath: string, diagnostic = false): Promise<BlkBlock> {
-	if (files.has(filePath))
-		return Promise.resolve(files.get(filePath))
-
-	return scanFile(filePath, null, diagnostic)
+	return files.has(filePath) ? Promise.resolve(files.get(filePath)) : scanFile(filePath, null, diagnostic)
 }
 
 function addCompletion(filePath: string, name: string, kind: CompletionItemKind) {
@@ -427,11 +311,7 @@ function addCompletion(filePath: string, name: string, kind: CompletionItemKind)
 		completion.get(filePath).push(item)
 }
 
-function cleanupBlkParam(param: BlkParam) {
-	if (!param)
-		return
-	param.indent = null
-}
+function cleanupBlkParam(param: BlkParam) { if (param) param.indent = null }
 
 function cleanupBlkBlock(blk: BlkBlock) {
 	if (!blk)
@@ -484,16 +364,12 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 			}
 		}
 		addCompletion(fsPath, blk.name, CompletionItemKind.Struct)
-		if (blk.name == entityWithTemplateName) {
+		if (blk.name == entityWithTemplateName)
 			for (const param of blk?.params ?? [])
-				if ((param.value?.length ?? 0) > 2 && param.value[0] == templateField && param.value[1] == "t") {
-					const parts = param.value[2].split("+")
-					for (const part of parts) {
-						const partName = removeQuotes(part)
+				if ((param.value?.length ?? 0) > 2 && param.value[0] == templateField && param.value[1] == "t")
+					for (const partName of splitAndRemoveQuotes(param.value[2]))
 						entitiesInScene.set(partName, entitiesInScene.has(partName) ? entitiesInScene.get(partName) + 1 : 1)
-					}
-				}
-		}
+
 		for (const param of blk?.params ?? []) {
 			const len = param.value?.length ?? 0
 			if (len > 2 && param.value[0] == extendsField && param.value[1] == "t") {
@@ -521,6 +397,29 @@ function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic
 		return
 
 	for (const blk of blkFile?.blocks ?? []) {
+		if (blk.name == entityWithTemplateName)
+			for (const param of blk?.params ?? [])
+				if ((param.value?.length ?? 0) > 2 && param.value[0] == templateField && param.value[1] == "t") {
+					const parts = splitAndRemoveQuotes(param.value[2])
+					for (const partName of parts)
+						if (getTemplates(partName).length == 0)
+							diagnostics.push({
+								message: `Unknown parent template '${partName}'`,
+								range: toRange(param.location),
+								severity: DiagnosticSeverity.Error,
+							})
+					const partsMap = new Map<string, boolean>()
+					for (const partName of parts) {
+						if (partsMap.has(partName))
+							diagnostics.push({
+								message: `Duplicate template name '${partName}'`,
+								range: toRange(param.location),
+								severity: DiagnosticSeverity.Error,
+							})
+						partsMap.set(partName, true)
+					}
+				}
+
 		for (const param of blk?.params ?? []) {
 			const len = param.value?.length ?? 0
 			if (len > 2 && param.value[0] == extendsField && param.value[1] == "t") {
@@ -635,6 +534,8 @@ function getTemplates(name: string): TemplatePos[] {
 	return res
 }
 
+function splitAndRemoveQuotes(str: string, delemiter = "+"): string[] { return str.split(delemiter).map(removeQuotes) }
+
 function removeQuotes(str: string): string {
 	if (str.startsWith("\""))
 		str = str.substr(1, str.length - 1)
@@ -655,11 +556,11 @@ function getParamAt(blkFile: BlkBlock, position: Position, depth = 0): { res: Bl
 	return null
 }
 
-function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyExtends = false): { res: TemplatePos[], name?: string, error?: string } {
+function onDefinition(blkFile: BlkBlock, position: Position, onlyExtends = false): { res: TemplatePos[], name?: string, error?: string } {
 	const param = getParamAt(blkFile, position)
 	if (param && param.res.value.length >= 3
 		&& (!onlyExtends || (param.depth == 1 && param.res.value[0] == extendsField && param.res.value[1] == "t"))) {
-		const startOffset =  (param.res.value[0].length + param.res.value[1].length + param.res.value[2].length) - (param.res.location.end.column - 1 - position.character)
+		const startOffset = (param.res.value[0].length + param.res.value[1].length + param.res.value[2].length) - (param.res.location.end.column - 1 - position.character)
 		let name = ""
 		if (startOffset > param.res.value[0].length) {
 			name = removeQuotes(param.res.value[2])
@@ -751,29 +652,4 @@ function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Posi
 		}
 	}
 	return []
-}
-
-function walk(dir: string, iter: (err: NodeJS.ErrnoException, path: string) => Promise<void>): Promise<void> {
-	return new Promise<void>((done) =>
-		readdir(dir, function (err, list) {
-			if (err) {
-				iter(err, dir).finally(done)
-				return
-			}
-			const promises: Promise<void>[] = []
-			for (let file of list) {
-				if (!file) continue
-				file = resolve(dir, file)
-				const stat = statSync(file)
-				if (stat && stat.isDirectory())
-					promises.push(walk(file, iter))
-				else
-					promises.push(iter(null, file))
-			}
-			if (promises.length == 0)
-				done()
-			else
-				Promise.all(promises).finally(done)
-		})
-	)
 }
