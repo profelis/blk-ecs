@@ -18,10 +18,7 @@ export function walk(dir: string, iter: (err: NodeJS.ErrnoException, path: strin
 				else
 					promises.push(iter(null, file))
 			}
-			if (promises.length == 0)
-				done()
-			else
-				Promise.all(promises).finally(done)
+			if (promises.length == 0) done(); else Promise.all(promises).finally(done)
 		})
 	)
 }

@@ -10,11 +10,7 @@ export interface BlkPosition {
 
 export class BlkPosition {
 	static create(line = 1, column = 1, offset = 0): BlkPosition {
-		return {
-			offset: offset,
-			line: line,
-			column: column,
-		}
+		return { offset: offset, line: line, column: column }
 	}
 	static toPosition(pos: BlkPosition) {
 		return Position.create(pos.line - 1, pos.column - 1)
@@ -94,10 +90,7 @@ export class BlkBlock {
 		return {
 			name: blk.name,
 			kind: SymbolKind.Struct,
-			location: {
-				uri: uri,
-				range: BlkLocation.toRange(blk.location)
-			}
+			location: { uri: uri, range: BlkLocation.toRange(blk.location) }
 		}
 	}
 	static toDocumentSymbol(blk: BlkBlock): DocumentSymbol {

@@ -73,9 +73,8 @@ connection.onInitialized(() => {
 
 	connection.onDidChangeTextDocument(params => {
 		const fsPath = URI.parse(params.textDocument.uri).fsPath
-		if (params.contentChanges.length > 0) {
+		if (params.contentChanges.length > 0)
 			fileContents.set(fsPath, params.contentChanges[0].text)
-		}
 		scanFile(fsPath, null, false, true)
 	})
 
@@ -150,10 +149,7 @@ connection.onInitialized(() => {
 				? ("```\n" + res.res.map(it => `${it.filePath}`).join("\n") + "\n```")
 				: ("'" + res.name + "' is declared in:\n```\n" + res.res.map(it => `${it.filePath}:${it.location.start.line}`).join("\n") + "\n```")
 		return {
-			contents: {
-				value: text,
-				kind: MarkupKind.Markdown
-			}
+			contents: { value: text, kind: MarkupKind.Markdown }
 		}
 	})
 
@@ -398,7 +394,7 @@ function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic
 					for (const partName of parts) {
 						if (partsMap.has(partName))
 							diagnostics.push({
-								message: `Duplicate template '${partName}'`,
+								message: `Template duplicate '${partName}'`,
 								range: BlkLocation.toRange(param.location),
 								severity: DiagnosticSeverity.Error,
 							})

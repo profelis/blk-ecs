@@ -19,3 +19,7 @@ Especially thanks to [eguskov](https://github.com/eguskov) for his [blktool plug
 
 - https://pegjs.org/
 - ts plugin https://github.com/metadevpro/ts-pegjs
+
+- npm install pegjs
+- npm install ts-pegjs
+- pegjs --plugin ./node_modules/ts-pegjs -o server/src/blk.ts --cache blk.pegjs
