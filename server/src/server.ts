@@ -154,8 +154,8 @@ connection.onInitialized(() => {
 		const text = res.error
 			? res.error
 			: res?.include
-			? ("```\n" + res.res.map(it => `${it.filePath}`).join("\n") + "\n```")
-			: ("'" + res.name + "' is declared in:\n```\n" + res.res.map(it => `${it.filePath}:${it.location.start.line}`).join("\n") + "\n```")
+				? ("```\n" + res.res.map(it => `${it.filePath}`).join("\n") + "\n```")
+				: ("'" + res.name + "' is declared in:\n```\n" + res.res.map(it => `${it.filePath}:${it.location.start.line}`).join("\n") + "\n```")
 		return {
 			contents: {
 				value: text,
@@ -407,7 +407,7 @@ function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic
 					for (const partName of parts)
 						if (getTemplates(partName).length == 0)
 							diagnostics.push({
-								message: `Unknown parent template '${partName}'`,
+								message: `Unknown template '${partName}'`,
 								range: toRange(param.location),
 								severity: DiagnosticSeverity.Error,
 							})
@@ -415,7 +415,7 @@ function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic
 					for (const partName of parts) {
 						if (partsMap.has(partName))
 							diagnostics.push({
-								message: `Duplicate template name '${partName}'`,
+								message: `Duplicate template '${partName}'`,
 								range: toRange(param.location),
 								severity: DiagnosticSeverity.Error,
 							})
@@ -570,9 +570,8 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 	if ((param?.res?.value?.length ?? 0) >= 3
 		&& (!onlyExtends || (param.depth == 1 && param.res.value[0] == extendsField && param.res.value[1] == "t"))) {
 		const startOffset = (param.res.value[0].length + param.res.value[1].length + param.res.value[2].length) - (param.res.location.end.column - 1 - position.character)
-		let name = ""
+		let name = removeQuotes(param.res.value[2])
 		if (startOffset > param.res.value[0].length) {
-			name = removeQuotes(param.res.value[2])
 			if (name.indexOf("+") > 0) {
 				const parts = param.res.value[2].split("+")
 				let offset = param.res.location.end.column - 1 - position.character
@@ -592,19 +591,23 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 
 			return { res: [], error: `#undefined template '${name}'` }
 		}
+		if (!onlyExtends) {
+			name = param.res.value[0]
+			const nameRes = getTemplates(name)
+			if (nameRes.length > 0)
+				return { res: nameRes, name: param.res.value[0] }
 
-		name = param.res.value[0]
-		const nameRes = getTemplates(name)
-		if (nameRes.length > 0)
-			return { res: nameRes, name: param.res.value[0] }
-
+		}
 		return { res: [], error: `#undefined template '${name}'` }
 	}
 	if (param?.include) {
 		const paths: string[] = []
 		for (const ws of workspaces.values())
 			paths.push(ws)
-		return { include: param.include.value, res: [{ filePath: findFile(param.include.value, dirname(URI.parse(uri).fsPath), paths), location: BlkLocation.create() }] }
+		let path = param.include.value
+		if (path.startsWith("#"))
+			path = path.substr(1)
+		return { include: param.include.value, res: [{ filePath: findFile(path, dirname(URI.parse(uri).fsPath), paths), location: BlkLocation.create() }] }
 	}
 	return { res: [] }
 }
