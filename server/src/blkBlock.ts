@@ -1,4 +1,3 @@
-
 import {
 	DocumentSymbol, Position, Range, SymbolInformation, SymbolKind
 } from 'vscode-languageserver'
@@ -17,10 +16,9 @@ export class BlkPosition {
 			column: column,
 		}
 	}
-}
-
-export function toPosition(pos: BlkPosition) {
-	return Position.create(pos.line - 1, pos.column - 1)
+	static toPosition(pos: BlkPosition) {
+		return Position.create(pos.line - 1, pos.column - 1)
+	}
 }
 
 export interface BlkLocation {
@@ -34,18 +32,16 @@ export class BlkLocation {
 			end: end ?? BlkPosition.create()
 		}
 	}
-}
-
-export function toRange(loc: BlkLocation) { return Range.create(toPosition(loc.start), toPosition(loc.end)) }
-
-export function isPosInLocation(location: BlkLocation, position: { line: number, character: number }) {
-	if (position.line < location.start.line - 1 ||
-		(position.line == location.start.line - 1 && position.character < location.start.column - 1))
-		return false
-	if (position.line > location.end.line - 1 ||
-		(position.line == location.end.line - 1 && position.character > location.end.column - 1))
-		return false
-	return true
+	static isPosInLocation(location: BlkLocation, position: Position) {
+		if (position.line < location.start.line - 1 ||
+			(position.line == location.start.line - 1 && position.character < location.start.column - 1))
+			return false
+		if (position.line > location.end.line - 1 ||
+			(position.line == location.end.line - 1 && position.character > location.end.column - 1))
+			return false
+		return true
+	}
+	static toRange(loc: BlkLocation) { return Range.create(BlkPosition.toPosition(loc.start), BlkPosition.toPosition(loc.end)) }
 }
 
 export interface BlkComment {
@@ -70,6 +66,19 @@ export interface BlkParam {
 	value: string[]
 }
 
+export class BlkParam {
+	static toDocumentSymbol(param: BlkParam): DocumentSymbol {
+		const range = BlkLocation.toRange(param.location)
+		return {
+			name: param.value[0],
+			kind: SymbolKind.Field,
+			range: range,
+			selectionRange: range,
+			detail: param.value.length > 2 ? param.value[2] : null,
+		}
+	}
+}
+
 export interface BlkBlock {
 	blocks: BlkBlock[]
 	comments: BlkComment[]
@@ -80,35 +89,25 @@ export interface BlkBlock {
 	params: BlkParam[]
 }
 
-export function blkToSymbolInformation(blk: BlkBlock, uri: string): SymbolInformation {
-	return {
-		name: blk.name,
-		kind: SymbolKind.Struct,
-		location: {
-			uri: uri,
-			range: toRange(blk.location)
+export class BlkBlock {
+	static toSymbolInformation(blk: BlkBlock, uri: string): SymbolInformation {
+		return {
+			name: blk.name,
+			kind: SymbolKind.Struct,
+			location: {
+				uri: uri,
+				range: BlkLocation.toRange(blk.location)
+			}
 		}
 	}
-}
-
-export function blkToDocumentSymbol(blk: BlkBlock): DocumentSymbol {
-	const range = toRange(blk.location)
-	return {
-		name: blk.name,
-		kind: SymbolKind.Struct,
-		range: range,
-		selectionRange: range,
-		children: blk.params ? blk.params.map(it => paramToDocumentSymbol(it)) : null,
-	}
-}
-
-export function paramToDocumentSymbol(param: BlkParam): DocumentSymbol {
-	const range = toRange(param.location)
-	return {
-		name: param.value[0],
-		kind: SymbolKind.Field,
-		range: range,
-		selectionRange: range,
-		detail: param.value.length > 2 ? param.value[2] : null,
+	static toDocumentSymbol(blk: BlkBlock): DocumentSymbol {
+		const range = BlkLocation.toRange(blk.location)
+		return {
+			name: blk.name,
+			kind: SymbolKind.Struct,
+			range: range,
+			selectionRange: range,
+			children: blk.params ? blk.params.map(it => BlkParam.toDocumentSymbol(it)) : null,
+		}
 	}
 }

@@ -4,11 +4,11 @@ import {
 
 import { parse } from './blk'
 import { readFile } from 'fs'
-import { extname, resolve, join, dirname } from 'path'
+import { extname, dirname } from 'path'
 import { URI } from 'vscode-uri'
 import { extractAsPromised } from 'fuzzball'
 import { findFile, walk } from './fsUtils'
-import { BlkBlock, BlkParam, toRange, isPosInLocation, BlkLocation, blkToSymbolInformation, blkToDocumentSymbol, BlkIncludes } from './blkBlock'
+import { BlkBlock, BlkParam, BlkLocation, BlkIncludes } from './blkBlock'
 
 
 const namespacePostfix = ":_namespace\""
@@ -105,23 +105,20 @@ connection.onInitialized(() => {
 
 	connection.onWorkspaceSymbol(async (params) => {
 		const data: Array<{ file: string; blk: BlkBlock }> = []
-		for (const [file, blkFile] of files) {
+		for (const [file, blkFile] of files)
 			for (const blk of blkFile?.blocks ?? [])
 				data.push({ file: file, blk: blk })
-		}
 
 		const scores = await extractAsPromised(params.query, data, { processor: (it) => it.blk.name, limit: 1000, cutoff: 20 })
 		const res: SymbolInformation[] = []
-		for (const [it] of scores) {
-			res.push(blkToSymbolInformation(it.blk, URI.file(it.file).toString()))
-			// connection.console.log(`>> ${it.blk.name} from ${it.file} at ${JSON.stringify(it.blk.location)} ratio: ${ratio}`)
-		}
+		for (const [it] of scores)
+			res.push(BlkBlock.toSymbolInformation(it.blk, URI.file(it.file).toString()))
 		return res
 	})
 
 	connection.onDocumentSymbol(async (params) => {
 		const blkFile = await getOrScanFileUri(params.textDocument.uri)
-		return blkFile?.blocks ? blkFile.blocks.map(blkToDocumentSymbol) : []
+		return blkFile?.blocks ? blkFile.blocks.map(BlkBlock.toDocumentSymbol) : []
 	})
 
 	connection.onDefinition(async params => {
@@ -133,13 +130,9 @@ connection.onInitialized(() => {
 		if (res.error || res.res.length == 0)
 			return null
 
-		const result = res.res.map(it => {
-			return {
-				uri: URI.file(it.filePath).toString(),
-				range: toRange(it.location),
-			}
+		return res.res.map(it => {
+			return { uri: URI.file(it.filePath).toString(), range: BlkLocation.toRange(it.location) }
 		})
-		return result
 	})
 
 	connection.onHover(async params => {
@@ -171,13 +164,10 @@ connection.onInitialized(() => {
 
 		const pathData = URI.parse(params.textDocument.uri)
 		const res = findAllReferencesAt(pathData.fsPath, blkFile, params.position)
-		if (res.length == 0)
-			return null
-
-		return res.map(it => {
+		return res.length == 0 ? null : res.map(it => {
 			return {
 				uri: URI.file(it.filePath).toString(),
-				range: toRange(it.location),
+				range: BlkLocation.toRange(it.location),
 			}
 		})
 	})
@@ -209,27 +199,22 @@ connection.onInitialized(() => {
 
 		if (extendsCacheInvalid) {
 			extendsCacheInvalid = false
-			for (const fileMap of extendsInFiles.values()) {
-				for (const [key, value] of fileMap) {
+			for (const fileMap of extendsInFiles.values())
+				for (const [key, value] of fileMap)
 					usagesMap.set(key, (usagesMap.has(key) ? usagesMap.get(key) : 0) + value)
-				}
-			}
 		}
 		if (entitiesInScenesInvalid) {
 			entitiesInScenesInvalid = false
-			for (const fileMap of entitiesInScenes.values()) {
-				for (const [key, value] of fileMap) {
+			for (const fileMap of entitiesInScenes.values())
+				for (const [key, value] of fileMap)
 					usagesMap.set(key, (usagesMap.has(key) ? usagesMap.get(key) : 0) + value)
-				}
-			}
 		}
 
 		const res: CodeLens[] = []
 		for (const blk of blkFile?.blocks ?? []) {
 			const name = removeQuotes(blk.name)
 			const count = usagesMap.has(name) ? usagesMap.get(name) : 0
-			const range = toRange(blk.location)
-			res.push({ range: range, command: { title: `${count} usage${count == 1 ? "" : "s"}`, command: null } })
+			res.push({ range: BlkLocation.toRange(blk.location), command: { title: `${count} usage${count == 1 ? "" : "s"}`, command: null } })
 		}
 		return res
 	})
@@ -310,10 +295,7 @@ function addCompletion(filePath: string, name: string, kind: CompletionItemKind)
 		return
 	completionCacheInvalid = true
 	const item = { label: name, kind: kind }
-	if (!completion.has(filePath))
-		completion.set(filePath, [item])
-	else
-		completion.get(filePath).push(item)
+	if (!completion.has(filePath)) completion.set(filePath, [item]); else completion.get(filePath).push(item)
 }
 
 function cleanupBlkParam(param: BlkParam) { if (param) param.indent = null }
@@ -323,7 +305,6 @@ function cleanupBlkBlock(blk: BlkBlock) {
 		return
 	blk.comments = null
 	blk.emptyLines = null
-	// blk.includes = null
 	for (const param of blk?.params ?? [])
 		cleanupBlkParam(param)
 	for (const it of blk?.blocks ?? [])
@@ -410,7 +391,7 @@ function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic
 						if (getTemplates(partName).length == 0)
 							diagnostics.push({
 								message: `Unknown template '${partName}'`,
-								range: toRange(param.location),
+								range: BlkLocation.toRange(param.location),
 								severity: DiagnosticSeverity.Error,
 							})
 					const partsMap = new Map<string, boolean>()
@@ -418,7 +399,7 @@ function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic
 						if (partsMap.has(partName))
 							diagnostics.push({
 								message: `Duplicate template '${partName}'`,
-								range: toRange(param.location),
+								range: BlkLocation.toRange(param.location),
 								severity: DiagnosticSeverity.Error,
 							})
 						partsMap.set(partName, true)
@@ -432,20 +413,20 @@ function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic
 				if (parentName == blk.name)
 					diagnostics.push({
 						message: `Recursively dependency '${parentName}'`,
-						range: toRange(param.location),
+						range: BlkLocation.toRange(param.location),
 						severity: DiagnosticSeverity.Error,
 					})
 				const parents = getTemplates(parentName)
 				if (parents.length == 0)
 					diagnostics.push({
 						message: `Unknown parent template '${parentName}'`,
-						range: toRange(param.location),
+						range: BlkLocation.toRange(param.location),
 						severity: DiagnosticSeverity.Error,
 					})
 				else if (parents.length > 1)
 					diagnostics.push({
 						message: `Multiple templates '${parentName}'`,
-						range: toRange(param.location),
+						range: BlkLocation.toRange(param.location),
 						severity: DiagnosticSeverity.Hint,
 					})
 			}
@@ -464,7 +445,7 @@ function updateDiagnostics(fsPath: string, blk: BlkBlock, diagnostics: Diagnosti
 
 function scanFile(fsPath: string, workspaceFsPath: string = null, diagnostic = false, lazy = false): Promise<BlkBlock> {
 	return new Promise(done => {
-		function onFile(err, data) {
+		function onFile(err: NodeJS.ErrnoException, data: Buffer | string) {
 			if (err != null) {
 				connection.console.log(`read file ${fsPath} error:`)
 				connection.console.log(err.message)
@@ -491,7 +472,7 @@ function scanFile(fsPath: string, workspaceFsPath: string = null, diagnostic = f
 					if (diagnostic)
 						diagnostics.push({
 							message: err.message,
-							range: toRange(location),
+							range: BlkLocation.toRange(location),
 							severity: DiagnosticSeverity.Error,
 						})
 				}
@@ -551,18 +532,18 @@ function removeQuotes(str: string): string {
 
 function getParamAt(blkFile: BlkBlock, position: Position, depth = 0): { res: BlkParam, include: BlkIncludes, depth: number } {
 	for (const blk of blkFile?.blocks ?? []) {
-		if (isPosInLocation(blk.location, position))
+		if (BlkLocation.isPosInLocation(blk.location, position))
 			return getParamAt(blk, position, ++depth)
 		for (const include of blk?.includes)
-			if (isPosInLocation(include.location, position))
+			if (BlkLocation.isPosInLocation(include.location, position))
 				return { res: null, include: include, depth: depth }
 	}
-	for (const param of blkFile?.params ?? []) {
-		if (isPosInLocation(param.location, position))
+	for (const param of blkFile?.params ?? [])
+		if (BlkLocation.isPosInLocation(param.location, position))
 			return { res: param, include: null, depth: depth }
-	}
+
 	for (const include of blkFile?.includes)
-		if (isPosInLocation(include.location, position))
+		if (BlkLocation.isPosInLocation(include.location, position))
 			return { res: null, include: include, depth: depth }
 	return null
 }
@@ -602,16 +583,14 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 		}
 		return { res: [], error: `#undefined template '${name}'` }
 	}
-	if (param?.include) {
-		const paths: string[] = []
-		for (const ws of workspaces.values())
-			paths.push(ws)
-		let path = param.include.value
-		if (path.startsWith("#"))
-			path = path.substr(1)
-		return { include: param.include.value, res: [{ filePath: findFile(path, dirname(URI.parse(uri).fsPath), paths), location: BlkLocation.create() }] }
-	}
+	if (param?.include)
+		return { include: param.include.value, res: [{ filePath: findWSFile(param.include.value, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create() }] }
 	return { res: [] }
+}
+
+function findWSFile(path: string, cwd: string) {
+	path = path.startsWith("#") ? path.substr(1) : path
+	return findFile(path, cwd, Array.from(workspaces.values()))
 }
 
 function findAllReferences(name: string): TemplatePos[] {
@@ -619,20 +598,17 @@ function findAllReferences(name: string): TemplatePos[] {
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
 		for (const blk of blkFile?.blocks ?? []) {
-			if (blk.name == entityWithTemplateName) {
-				for (const param of blk?.params ?? []) {
+			if (blk.name == entityWithTemplateName)
+				for (const param of blk?.params ?? [])
 					if ((param.value?.length ?? 0) > 2 && param.value[0] == templateField && param.value[1] == "t") {
-						const parts = param.value[2].split("+")
-						for (const part of parts) {
-							const partName = removeQuotes(part)
-							if (partName != name)
-								continue
-							res.push({ filePath: filePath, location: param.location })
-							break
+						const parts = splitAndRemoveQuotes(param.value[2])
+						for (const partName of parts) {
+							if (partName == name) {
+								res.push({ filePath: filePath, location: param.location })
+								break
+							}
 						}
 					}
-				}
-			}
 			for (const param of blk?.params ?? [])
 				if ((param.value?.length ?? 0) > 2 && param.value[0] == extendsField && param.value[1] == "t" && (param.value[2] == name || param.value[2] == longName))
 					res.push({ filePath: filePath, location: param.location })
@@ -652,7 +628,7 @@ function findAllTemplatesWithParam(name: string, type: string): TemplatePos[] {
 
 function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Position): TemplatePos[] {
 	for (const blk of blkFile?.blocks ?? []) {
-		if (!blk.location || !isPosInLocation(blk.location, position))
+		if (!blk.location || !BlkLocation.isPosInLocation(blk.location, position))
 			continue
 		if (position.line == blk.location.start.line - 1) {
 			const res = findAllReferences(blk.name)
@@ -662,9 +638,7 @@ function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Posi
 			}
 		}
 		for (const param of blk?.params ?? []) {
-			if ((param.value?.length ?? 0) < 2)
-				continue
-			if (!isPosInLocation(param.location, position))
+			if ((param.value?.length ?? 0) < 2 || !BlkLocation.isPosInLocation(param.location, position))
 				continue
 			const res = findAllTemplatesWithParam(param.value[0], param.value[1])
 			if (res.length > 0)
