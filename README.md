@@ -3,7 +3,8 @@
 ## Powerful tool to work with ecs templates
 
 Supported features:
-- go to symbol (global or local)
+- go to symbols
+- go to include
 - go to parent template
 - go to any template by string under cursor
 - find all template references

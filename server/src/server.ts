@@ -190,8 +190,10 @@ connection.onInitialized(() => {
 				for (const it of file)
 					completionCacheMap.set(it.label, it)
 			completionCache = Array.from(completionCacheMap.values())
+			connection.console.log(`invalidate completion cache: ${completionCache.length} records in ${completion.size} files`)
 			completionCacheMap.clear()
 		}
+		connection.console.log(`completion: ${completionCache.length} records in ${completion.size} files`)
 		return completionCache
 	})
 
