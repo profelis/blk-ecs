@@ -10,7 +10,7 @@ export interface BlkPosition {
 }
 
 export class BlkPosition {
-	static create(line = 0, column = 0, offset = 0): BlkPosition {
+	static create(line = 1, column = 1, offset = 0): BlkPosition {
 		return {
 			offset: offset,
 			line: line,

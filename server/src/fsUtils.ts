@@ -1,5 +1,5 @@
-import { readdir, statSync } from 'fs'
-import { resolve } from 'path'
+import { readdir, statSync, existsSync } from 'fs'
+import { resolve, isAbsolute } from 'path'
 
 export function walk(dir: string, iter: (err: NodeJS.ErrnoException, path: string) => Promise<void>): Promise<void> {
 	return new Promise<void>((done) =>
@@ -24,4 +24,21 @@ export function walk(dir: string, iter: (err: NodeJS.ErrnoException, path: strin
 				Promise.all(promises).finally(done)
 		})
 	)
+}
+
+export function findFile(path: string, cwd: string, folders: string[]) {
+	path = (path || "").trim()
+	if (path.length == 0 || isAbsolute(path))
+		return path
+
+	const res = resolve(cwd, path)
+	if ((path.startsWith(".") && !path.startsWith("..")) || existsSync(res))
+		return res
+
+	for (const it of folders) {
+		const res = resolve(it, path)
+		if (existsSync(res))
+			return res
+	}
+	return path
 }

@@ -4,11 +4,11 @@ import {
 
 import { parse } from './blk'
 import { readFile } from 'fs'
-import { extname } from 'path'
+import { extname, resolve, join, dirname } from 'path'
 import { URI } from 'vscode-uri'
 import { extractAsPromised } from 'fuzzball'
-import { walk } from './fsUtils'
-import { BlkBlock, BlkParam, toRange, isPosInLocation, BlkLocation, blkToSymbolInformation, blkToDocumentSymbol } from './blkBlock'
+import { findFile, walk } from './fsUtils'
+import { BlkBlock, BlkParam, toRange, isPosInLocation, BlkLocation, blkToSymbolInformation, blkToDocumentSymbol, BlkIncludes } from './blkBlock'
 
 
 const namespacePostfix = ":_namespace\""
@@ -129,16 +129,17 @@ connection.onInitialized(() => {
 		if (!blkFile)
 			return null
 
-		const res = onDefinition(blkFile, params.position)
+		const res = onDefinition(params.textDocument.uri, blkFile, params.position)
 		if (res.error || res.res.length == 0)
 			return null
 
-		return res.res.map(it => {
+		const result = res.res.map(it => {
 			return {
 				uri: URI.file(it.filePath).toString(),
 				range: toRange(it.location),
 			}
 		})
+		return result
 	})
 
 	connection.onHover(async params => {
@@ -146,12 +147,14 @@ connection.onInitialized(() => {
 		if (!blkFile)
 			return null
 
-		const res = onDefinition(blkFile, params.position, /*only extends*/true)
+		const res = onDefinition(params.textDocument.uri, blkFile, params.position, /*only extends*/true)
 		if (res.res.length == 0 && !res.error)
 			return null
 
 		const text = res.error
 			? res.error
+			: res?.include
+			? ("```\n" + res.res.map(it => `${it.filePath}`).join("\n") + "\n```")
 			: ("'" + res.name + "' is declared in:\n```\n" + res.res.map(it => `${it.filePath}:${it.location.start.line}`).join("\n") + "\n```")
 		return {
 			contents: {
@@ -318,7 +321,7 @@ function cleanupBlkBlock(blk: BlkBlock) {
 		return
 	blk.comments = null
 	blk.emptyLines = null
-	blk.includes = null
+	// blk.includes = null
 	for (const param of blk?.params ?? [])
 		cleanupBlkParam(param)
 	for (const it of blk?.blocks ?? [])
@@ -544,21 +547,27 @@ function removeQuotes(str: string): string {
 	return str
 }
 
-function getParamAt(blkFile: BlkBlock, position: Position, depth = 0): { res: BlkParam, depth: number } {
+function getParamAt(blkFile: BlkBlock, position: Position, depth = 0): { res: BlkParam, include: BlkIncludes, depth: number } {
 	for (const blk of blkFile?.blocks ?? []) {
 		if (isPosInLocation(blk.location, position))
 			return getParamAt(blk, position, ++depth)
+		for (const include of blk?.includes)
+			if (isPosInLocation(include.location, position))
+				return { res: null, include: include, depth: depth }
 	}
 	for (const param of blkFile?.params ?? []) {
 		if (isPosInLocation(param.location, position))
-			return { res: param, depth: depth }
+			return { res: param, include: null, depth: depth }
 	}
+	for (const include of blkFile?.includes)
+		if (isPosInLocation(include.location, position))
+			return { res: null, include: include, depth: depth }
 	return null
 }
 
-function onDefinition(blkFile: BlkBlock, position: Position, onlyExtends = false): { res: TemplatePos[], name?: string, error?: string } {
+function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyExtends = false): { res: TemplatePos[], name?: string, include?: string, error?: string } {
 	const param = getParamAt(blkFile, position)
-	if (param && param.res.value.length >= 3
+	if ((param?.res?.value?.length ?? 0) >= 3
 		&& (!onlyExtends || (param.depth == 1 && param.res.value[0] == extendsField && param.res.value[1] == "t"))) {
 		const startOffset = (param.res.value[0].length + param.res.value[1].length + param.res.value[2].length) - (param.res.location.end.column - 1 - position.character)
 		let name = ""
@@ -590,6 +599,12 @@ function onDefinition(blkFile: BlkBlock, position: Position, onlyExtends = false
 			return { res: nameRes, name: param.res.value[0] }
 
 		return { res: [], error: `#undefined template '${name}'` }
+	}
+	if (param?.include) {
+		const paths: string[] = []
+		for (const ws of workspaces.values())
+			paths.push(ws)
+		return { include: param.include.value, res: [{ filePath: findFile(param.include.value, dirname(URI.parse(uri).fsPath), paths), location: BlkLocation.create() }] }
 	}
 	return { res: [] }
 }
