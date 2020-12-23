@@ -85,14 +85,14 @@ export interface BlkBlock {
 	params: BlkParam[]
 }
 
-export class BlkBlock {
-	static toSymbolInformation(blk: BlkBlock, uri: string): SymbolInformation {
-		return {
-			name: blk.name,
-			kind: SymbolKind.Struct,
-			location: { uri: uri, range: BlkLocation.toRange(blk.location) }
-		}
+export function toSymbolInformation(name: string, location: BlkLocation, uri: string, kind: SymbolKind): SymbolInformation {
+	return {
+		name: name,
+		kind: kind,
+		location: { uri: uri, range: BlkLocation.toRange(location) }
 	}
+}
+export class BlkBlock {
 	static toDocumentSymbol(blk: BlkBlock): DocumentSymbol {
 		const range = BlkLocation.toRange(blk.location)
 		return {

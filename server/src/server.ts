@@ -1,5 +1,5 @@
 import {
-	createConnection, ProposedFeatures, TextDocumentSyncKind, SymbolInformation, Position, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity, DidChangeWorkspaceFoldersNotification, CodeLens
+	createConnection, ProposedFeatures, TextDocumentSyncKind, SymbolInformation, Position, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity, DidChangeWorkspaceFoldersNotification, CodeLens, SymbolKind
 } from 'vscode-languageserver'
 
 import { parse } from './blk'
@@ -8,7 +8,7 @@ import { extname, dirname } from 'path'
 import { URI } from 'vscode-uri'
 import { extractAsPromised } from 'fuzzball'
 import { findFile, walk } from './fsUtils'
-import { BlkBlock, BlkParam, BlkLocation, BlkIncludes } from './blkBlock'
+import { BlkBlock, BlkParam, BlkLocation, BlkIncludes, toSymbolInformation } from './blkBlock'
 
 
 const namespacePostfix = ":_namespace\""
@@ -103,15 +103,25 @@ connection.onInitialized(() => {
 	})
 
 	connection.onWorkspaceSymbol(async (params) => {
-		const data: Array<{ file: string; blk: BlkBlock }> = []
+		const data: Array<{ file: string; location: BlkLocation, name: string, kind: SymbolKind }> = []
+		const usedParams = new Set<string>()
 		for (const [file, blkFile] of files)
-			for (const blk of blkFile?.blocks ?? [])
-				data.push({ file: file, blk: blk })
+			for (const blk of blkFile?.blocks ?? []) {
+				data.push({ file: file, name: blk.name, location: blk.location, kind: SymbolKind.Struct })
+				for (const param of blk.params ?? [])
+					if ((param?.value?.length ?? 0) > 1) {
+						const key = param.value[0] + " : " + param.value[1]
+						if (!usedParams.has(key)) {
+							data.push({ file: file, name: key, location: param.location, kind: SymbolKind.Field })
+							usedParams.add(key)
+						}
+					}
+			}
 
-		const scores = await extractAsPromised(params.query, data, { processor: (it) => it.blk.name, limit: 1000, cutoff: 20 })
+		const scores = await extractAsPromised(params.query, data, { processor: (it) => it.name, limit: 100, cutoff: 20 })
 		const res: SymbolInformation[] = []
 		for (const [it] of scores)
-			res.push(BlkBlock.toSymbolInformation(it.blk, URI.file(it.file).toString()))
+			res.push(toSymbolInformation(it.name, it.location, URI.file(it.file).toString(), it.kind))
 		return res
 	})
 
