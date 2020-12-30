@@ -625,10 +625,16 @@ function findAllReferences(name: string): TemplatePos[] {
 function findAllTemplatesWithParam(name: string, type: string): TemplatePos[] {
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
-		for (const blk of blkFile?.blocks ?? [])
+		for (const blk of blkFile?.blocks ?? []) {
 			for (const param of blk?.params ?? [])
 				if ((param.value?.length ?? 0) > 1 && param.value[0] == name && param.value[1] == type)
 					res.push({ filePath: filePath, location: param.location })
+			if (type == "") {
+				for (const block of blk?.blocks ?? [])
+					if (block.name == name)
+						res.push({ filePath: filePath, location: block.location })
+			}
+		}
 	return res
 }
 
@@ -647,6 +653,13 @@ function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Posi
 			if ((param.value?.length ?? 0) < 2 || !BlkLocation.isPosInLocation(param.location, position))
 				continue
 			const res = findAllTemplatesWithParam(param.value[0], param.value[1])
+			if (res.length > 0)
+				return res
+		}
+		for (const block of blk?.blocks ?? []) {
+			if (!block.location || !BlkLocation.isPosInLocation(block.location, position))
+				continue
+			const res = findAllTemplatesWithParam(block.name, "")
 			if (res.length > 0)
 				return res
 		}
