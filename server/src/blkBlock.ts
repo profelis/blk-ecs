@@ -2,6 +2,8 @@ import {
 	DocumentSymbol, Position, Range, SymbolInformation, SymbolKind
 } from 'vscode-languageserver'
 
+const namespacePostfix = ":_namespace\""
+
 export interface BlkPosition {
 	offset: number
 	line: number
@@ -94,13 +96,28 @@ export function toSymbolInformation(name: string, location: BlkLocation, uri: st
 }
 export class BlkBlock {
 	static toDocumentSymbol(blk: BlkBlock): DocumentSymbol {
+		let children = blk.params ? blk.params.map(it => BlkParam.toDocumentSymbol(it)) : null
+		if (blk.blocks) {
+			children = children ?? []
+			for (const child of blk.blocks)
+				if (child.name && child.name.indexOf(":") == -1 && !child.name.endsWith(namespacePostfix)) {
+					const pos = BlkLocation.toRange(child.location)
+					children.push({
+						name: child.name,
+						kind: SymbolKind.Field,
+						range: pos,
+						selectionRange: pos,
+						detail: "{}",
+					})
+				}
+		}
 		const range = BlkLocation.toRange(blk.location)
 		return {
 			name: blk.name,
 			kind: SymbolKind.Struct,
 			range: range,
 			selectionRange: range,
-			children: blk.params ? blk.params.map(it => BlkParam.toDocumentSymbol(it)) : null,
+			children: children,
 		}
 	}
 }

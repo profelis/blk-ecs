@@ -108,7 +108,7 @@ connection.onInitialized(() => {
 		for (const [file, blkFile] of files)
 			for (const blk of blkFile?.blocks ?? []) {
 				data.push({ file: file, name: blk.name, location: blk.location, kind: SymbolKind.Struct })
-				for (const param of blk.params ?? [])
+				for (const param of blk?.params ?? [])
 					if ((param?.value?.length ?? 0) > 1) {
 						const key = param.value[0] + " : " + param.value[1]
 						if (!usedParams.has(key)) {
@@ -116,6 +116,12 @@ connection.onInitialized(() => {
 							usedParams.add(key)
 						}
 					}
+				for (const child of blk?.blocks ?? []) {
+					if (child.name && child.name.indexOf(":") == -1 && !child.name.endsWith(namespacePostfix) && !usedParams.has(child.name)) {
+						data.push({ file: file, name: child.name, location: child.location, kind: SymbolKind.Field })
+						usedParams.add(child.name)
+					}
+				}
 			}
 
 		const scores = await extractAsPromised(params.query, data, { processor: (it) => it.name, limit: 100, cutoff: 20 })
@@ -343,6 +349,17 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 						blk.params = blk.params ?? []
 						blk.params.push(newParam)
 					}
+					for (const childBlock of child.blocks) {
+						const parts = removeQuotes(childBlock.name).split(":").map(it => it.trim())
+						const newParam = {
+							indent: BlkLocation.create(),
+							location: childBlock.location,
+							value: parts,
+						}
+						newParam.value[0] = prefix + newParam.value[0]
+						blk.params = blk.params ?? []
+						blk.params.push(newParam)
+					}
 				} else if (child.name.indexOf(":") != -1) {
 					const parts = removeQuotes(child.name).split(":").map(it => it.trim())
 					const newParam = {
@@ -352,7 +369,8 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 					}
 					blk.params = blk.params ?? []
 					blk.params.push(newParam)
-				}
+				} else
+					addCompletion(fsPath, child.name, CompletionItemKind.Field)
 			}
 		}
 		addCompletion(fsPath, blk.name, CompletionItemKind.Struct)
