@@ -340,7 +340,7 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 				if (child.name.endsWith(namespacePostfix)) {
 					const prefix = child.name.substr(1, child.name.length - namespacePostfix.length - 1) + "."
 					for (const childParam of child.params) {
-						const newParam = {
+						const newParam: BlkParam = {
 							indent: childParam.indent,
 							location: childParam.location,
 							value: childParam.value.concat([]),
@@ -351,7 +351,7 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 					}
 					for (const childBlock of child.blocks) {
 						const parts = removeQuotes(childBlock.name).split(":").map(it => it.trim())
-						const newParam = {
+						const newParam: BlkParam = {
 							indent: BlkLocation.create(),
 							location: childBlock.location,
 							value: parts,
@@ -362,7 +362,7 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 					}
 				} else if (child.name.indexOf(":") != -1) {
 					const parts = removeQuotes(child.name).split(":").map(it => it.trim())
-					const newParam = {
+					const newParam: BlkParam = {
 						indent: BlkLocation.create(),
 						location: child.location,
 						value: parts,

@@ -13,10 +13,7 @@ export function walk(dir: string, iter: (err: NodeJS.ErrnoException, path: strin
 				if (!file) continue
 				file = resolve(dir, file)
 				const stat = statSync(file)
-				if (stat && stat.isDirectory())
-					promises.push(walk(file, iter))
-				else
-					promises.push(iter(null, file))
+				promises.push(stat && stat.isDirectory() ? walk(file, iter) : iter(null, file))
 			}
 			if (promises.length == 0) done(); else Promise.all(promises).finally(done)
 		})
