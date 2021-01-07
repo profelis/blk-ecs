@@ -275,7 +275,10 @@ connection.onInitialized(() => {
 					return { range: BlkLocation.toRange(param.location), placeholder: tail(param.value[0]) }
 			for (const child of blk?.blocks ?? [])
 				if (BlkLocation.isPosInLocation(child.location, params.position))
-					return { range: BlkLocation.toRange(child.location), placeholder: tail(child.name) }
+					if (!child.name.endsWith(namespacePostfix))
+						return { range: BlkLocation.toRange(child.location), placeholder: tail(child.name) }
+					else
+						return null
 			if (BlkLocation.isPosInLocation(blk.location, params.position))
 				return null
 		}
