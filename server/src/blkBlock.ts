@@ -10,7 +10,10 @@ export const entityWithTemplateName = "entity"
 
 export function namespace(name: string) {
 	const parts = name.split(".")
-	return parts.length >= 2 ? parts[0] : ""
+	if (parts.length <= 2)
+		return parts.length == 2 ? parts[0] : ""
+	parts.pop()
+	return parts.join(".")
 }
 
 

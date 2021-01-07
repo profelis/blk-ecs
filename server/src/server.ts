@@ -227,15 +227,15 @@ connection.onInitialized(() => {
 		return res
 	})
 
+	connection.onCodeLensResolve(params => params)
+
 	connection.onRenameRequest(async params => {
-		connection.console.log(JSON.stringify(params))
 		const blkFile = await getOrScanFileUri(params.textDocument.uri)
 		if (!blkFile)
 			return null
 
 		const pathData = URI.parse(params.textDocument.uri)
 		const res = findAllReferencesAt(pathData.fsPath, blkFile, params.position)
-		connection.console.log(JSON.stringify(res, null, 2))
 		if (res.length == 0)
 			return null
 
@@ -257,17 +257,13 @@ connection.onInitialized(() => {
 			range.end.character = range.start.character + data.name.length - headLen
 			edit.changes[uri].push({ range: range, newText: params.newName })
 		}
-		connection.console.log(JSON.stringify(edit, null, 2))
 		return edit
 	})
 
 	connection.onPrepareRename(async params => {
-		connection.console.log("prepare: " + JSON.stringify(params))
 		const blkFile = await getOrScanFileUri(params.textDocument.uri)
 		if (!blkFile)
 			return null
-
-		connection.console.log(JSON.stringify(blkFile, null, 2))
 
 		for (const blk of blkFile?.blocks ?? []) {
 			for (const param of blk?.params ?? [])
@@ -284,8 +280,6 @@ connection.onInitialized(() => {
 		}
 		return null
 	})
-
-	connection.onCodeLensResolve(params => params)
 })
 
 connection.listen()
