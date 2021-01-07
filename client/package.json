@@ -10,7 +10,7 @@
 		"url": "https://github.com/profelis/blk-ecs"
 	},
 	"engines": {
-		"vscode": "^1.33.0"
+		"vscode": "^1.43.0"
 	},
 	"scripts": {},
 	"dependencies": {

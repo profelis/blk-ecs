@@ -632,7 +632,9 @@ function getParamAt(blkFile: BlkBlock, position: Position, depth = 0): { res: Bl
 
 function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyExtends = false): { res: TemplatePos[], name?: string, include?: string, error?: string } {
 	const param = getParamAt(blkFile, position)
-	if ((param?.res?.value?.length ?? 0) >= 3
+	if (!param)
+		return { res: [] }
+	if ((param.res?.value?.length ?? 0) >= 3
 		&& (!onlyExtends || (param.depth == 1 && param.res.value[0] == extendsField && param.res.value[1] == "t"))) {
 		const startOffset = (param.res.value[0].length + param.res.value[1].length + param.res.value[2].length) - (param.res.location.end.column - 1 - position.character)
 		let name = removeQuotes(param.res.value[2])
@@ -665,7 +667,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 		}
 		return { res: [], error: `#undefined template '${name}'` }
 	}
-	if (param?.include)
+	if (param.include)
 		return {
 			include: param.include.value,
 			res: [{ name: param.include.value, filePath: findWSFile(param.include.value, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create() }],
