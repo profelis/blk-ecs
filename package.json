@@ -10,7 +10,10 @@
 		"url": "https://github.com/profelis/blk-ecs"
 	},
 	"publisher": "profelis",
-	"categories": [],
+	"categories": [
+		"Linters",
+		"Programming Languages"
+	],
 	"keywords": [
 		"blk"
 	],
