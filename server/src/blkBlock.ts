@@ -2,7 +2,22 @@ import {
 	DocumentSymbol, Position, Range, SymbolInformation, SymbolKind
 } from 'vscode-languageserver'
 
-const namespacePostfix = ":_namespace\""
+export const namespacePostfix = ":_namespace\""
+export const extendsField = "_extends"
+export const templateField = "_template"
+
+export const entityWithTemplateName = "entity"
+
+export function namespace(name: string) {
+	const parts = name.split(".")
+	return parts.length >= 2 ? parts[0] : ""
+}
+
+
+export function tail(name: string) {
+	const parts = name.split(".")
+	return parts[parts.length - 1]
+}
 
 export interface BlkPosition {
 	offset: number
@@ -26,8 +41,8 @@ export interface BlkLocation {
 export class BlkLocation {
 	static create(start: BlkPosition = null, end: BlkPosition = null): BlkLocation {
 		return {
-			start: start ?? BlkPosition.create(),
-			end: end ?? BlkPosition.create()
+			start: start ? BlkPosition.create(start.line, start.column, start.offset) : BlkPosition.create(),
+			end: end ? BlkPosition.create(end.line, end.column, end.offset) : BlkPosition.create(),
 		}
 	}
 	static isPosInLocation(location: BlkLocation, position: Position) {
@@ -62,6 +77,7 @@ export interface BlkParam {
 	indent: BlkLocation
 	location: BlkLocation
 	value: string[]
+	shortName?: string
 }
 
 export class BlkParam {
@@ -94,6 +110,7 @@ export function toSymbolInformation(name: string, location: BlkLocation, uri: st
 		location: { uri: uri, range: BlkLocation.toRange(location) }
 	}
 }
+
 export class BlkBlock {
 	static toDocumentSymbol(blk: BlkBlock): DocumentSymbol {
 		let children = blk.params ? blk.params.map(it => BlkParam.toDocumentSymbol(it)) : null

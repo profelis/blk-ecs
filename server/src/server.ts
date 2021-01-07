@@ -1,5 +1,5 @@
 import {
-	createConnection, ProposedFeatures, TextDocumentSyncKind, SymbolInformation, Position, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity, DidChangeWorkspaceFoldersNotification, CodeLens, SymbolKind
+	createConnection, ProposedFeatures, TextDocumentSyncKind, SymbolInformation, Position, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity, DidChangeWorkspaceFoldersNotification, CodeLens, SymbolKind, Range, WorkspaceEdit
 } from 'vscode-languageserver'
 
 import { parse } from './blk'
@@ -8,14 +8,7 @@ import { extname, dirname } from 'path'
 import { URI } from 'vscode-uri'
 import { extractAsPromised } from 'fuzzball'
 import { findFile, walk } from './fsUtils'
-import { BlkBlock, BlkParam, BlkLocation, BlkIncludes, toSymbolInformation } from './blkBlock'
-
-
-const namespacePostfix = ":_namespace\""
-const extendsField = "_extends"
-
-const entityWithTemplateName = "entity"
-const templateField = "_template"
+import { BlkBlock, BlkParam, BlkLocation, BlkIncludes, toSymbolInformation, namespacePostfix, entityWithTemplateName, templateField, extendsField, tail, namespace } from './blkBlock'
 
 const connection = createConnection(ProposedFeatures.all)
 
@@ -44,6 +37,9 @@ connection.onInitialize((params) => {
 			},
 			codeLensProvider: {
 				resolveProvider: true,
+			},
+			renameProvider: {
+				prepareProvider: true,
 			}
 		}
 	}
@@ -231,6 +227,61 @@ connection.onInitialized(() => {
 		return res
 	})
 
+	connection.onRenameRequest(async params => {
+		connection.console.log(JSON.stringify(params))
+		const blkFile = await getOrScanFileUri(params.textDocument.uri)
+		if (!blkFile)
+			return null
+
+		const pathData = URI.parse(params.textDocument.uri)
+		const res = findAllReferencesAt(pathData.fsPath, blkFile, params.position)
+		connection.console.log(JSON.stringify(res, null, 2))
+		if (res.length == 0)
+			return null
+
+		const edit: WorkspaceEdit = { changes: {} }
+		for (const data of res) {
+			const uri = URI.file(data.filePath).toString()
+			if (!(uri in edit.changes))
+				edit.changes[uri] = []
+			const range = BlkLocation.toRange(data.location)
+			range.end.line = range.start.line
+			if (data.indent)
+				range.start.character = data.indent.end.column - 1
+			if (data.name.startsWith("\""))
+				range.start.character++
+			let headLen = namespace(data.name).length
+			if (headLen > 0)
+				headLen++
+			range.start.character += headLen
+			range.end.character = range.start.character + data.name.length - headLen
+			edit.changes[uri].push({ range: range, newText: params.newName })
+		}
+		connection.console.log(JSON.stringify(edit, null, 2))
+		return edit
+	})
+
+	connection.onPrepareRename(async params => {
+		connection.console.log("prepare: " + JSON.stringify(params))
+		const blkFile = await getOrScanFileUri(params.textDocument.uri)
+		if (!blkFile)
+			return null
+
+		connection.console.log(JSON.stringify(blkFile, null, 2))
+
+		for (const blk of blkFile?.blocks ?? []) {
+			for (const param of blk?.params ?? [])
+				if (BlkLocation.isPosInLocation(param.location, params.position))
+					return { range: BlkLocation.toRange(param.location), placeholder: tail(param.value[0]) }
+			for (const child of blk?.blocks ?? [])
+				if (BlkLocation.isPosInLocation(child.location, params.position))
+					return { range: BlkLocation.toRange(child.location), placeholder: tail(child.name) }
+			if (BlkLocation.isPosInLocation(blk.location, params.position))
+				return null
+		}
+		return null
+	})
+
 	connection.onCodeLensResolve(params => params)
 })
 
@@ -310,15 +361,11 @@ function addCompletion(filePath: string, name: string, kind: CompletionItemKind)
 	if (!completion.has(filePath)) completion.set(filePath, [item]); else completion.get(filePath).push(item)
 }
 
-function cleanupBlkParam(param: BlkParam) { if (param) param.indent = null }
-
 function cleanupBlkBlock(blk: BlkBlock) {
 	if (!blk)
 		return
 	blk.comments = null
 	blk.emptyLines = null
-	for (const param of blk?.params ?? [])
-		cleanupBlkParam(param)
 	for (const it of blk?.blocks ?? [])
 		cleanupBlkBlock(it)
 }
@@ -344,6 +391,7 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 							indent: childParam.indent,
 							location: childParam.location,
 							value: childParam.value.concat([]),
+							shortName: childParam.value[0]
 						}
 						newParam.value[0] = prefix + newParam.value[0]
 						blk.params = blk.params ?? []
@@ -351,10 +399,16 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 					}
 					for (const childBlock of child.blocks) {
 						const parts = removeQuotes(childBlock.name).split(":").map(it => it.trim())
+						const indent = BlkLocation.create(childBlock.location.start, childBlock.location.start)
+						if (childBlock.name.startsWith("\"")) {
+							indent.end.column++
+							indent.end.offset++
+						}
 						const newParam: BlkParam = {
-							indent: BlkLocation.create(),
+							indent: indent,
 							location: childBlock.location,
 							value: parts,
+							shortName: parts[0],
 						}
 						newParam.value[0] = prefix + newParam.value[0]
 						blk.params = blk.params ?? []
@@ -362,8 +416,13 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 					}
 				} else if (child.name.indexOf(":") != -1) {
 					const parts = removeQuotes(child.name).split(":").map(it => it.trim())
+					const indent = BlkLocation.create(child.location.start, child.location.start)
+					if (child.name.startsWith("\"")) {
+						indent.end.column++
+						indent.end.offset++
+					}
 					const newParam: BlkParam = {
-						indent: BlkLocation.create(),
+						indent: indent,
 						location: child.location,
 						value: parts,
 					}
@@ -531,8 +590,10 @@ function scanWorkspace(fsPath: string): Promise<void> {
 }
 
 interface TemplatePos {
+	name: string
 	filePath: string
 	location: BlkLocation
+	indent?: BlkLocation
 }
 
 function getTemplates(name: string): TemplatePos[] {
@@ -540,7 +601,7 @@ function getTemplates(name: string): TemplatePos[] {
 	for (const [filePath, blkFile] of files)
 		for (const blk of blkFile?.blocks ?? [])
 			if (blk.name == name)
-				res.push({ filePath: filePath, location: blk.location })
+				res.push({ name: blk.name, filePath: filePath, location: blk.location })
 	return res
 }
 
@@ -608,7 +669,10 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 		return { res: [], error: `#undefined template '${name}'` }
 	}
 	if (param?.include)
-		return { include: param.include.value, res: [{ filePath: findWSFile(param.include.value, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create() }] }
+		return {
+			include: param.include.value,
+			res: [{ name: param.include.value, filePath: findWSFile(param.include.value, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create() }],
+		}
 	return { res: [] }
 }
 
@@ -628,14 +692,14 @@ function findAllReferences(name: string): TemplatePos[] {
 						const parts = splitAndRemoveQuotes(param.value[2])
 						for (const partName of parts) {
 							if (partName == name) {
-								res.push({ filePath: filePath, location: param.location })
+								res.push({ name: param?.shortName ?? name, filePath: filePath, location: param.location, indent: param.indent })
 								break
 							}
 						}
 					}
 			for (const param of blk?.params ?? [])
 				if ((param.value?.length ?? 0) > 2 && param.value[0] == extendsField && param.value[1] == "t" && (param.value[2] == name || param.value[2] == longName))
-					res.push({ filePath: filePath, location: param.location })
+					res.push({ name: param?.shortName ?? name, filePath: filePath, location: param.location, indent: param.indent })
 		}
 	return res
 }
@@ -646,11 +710,11 @@ function findAllTemplatesWithParam(name: string, type: string): TemplatePos[] {
 		for (const blk of blkFile?.blocks ?? []) {
 			for (const param of blk?.params ?? [])
 				if ((param.value?.length ?? 0) > 1 && param.value[0] == name && param.value[1] == type)
-					res.push({ filePath: filePath, location: param.location })
+					res.push({ name: param?.shortName ?? name, filePath: filePath, location: param.location, indent: param.indent })
 			if (type == "") {
 				for (const block of blk?.blocks ?? [])
 					if (block.name == name)
-						res.push({ filePath: filePath, location: block.location })
+						res.push({ name: name, filePath: filePath, location: block.location })
 			}
 		}
 	return res
@@ -663,7 +727,7 @@ function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Posi
 		if (position.line == blk.location.start.line - 1) {
 			const res = findAllReferences(blk.name)
 			if (res.length > 0) {
-				res.splice(0, 0, { filePath: filePath, location: blk.location })
+				res.splice(0, 0, { name: blk.name, filePath: filePath, location: blk.location })
 				return res
 			}
 		}
