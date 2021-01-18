@@ -10,16 +10,16 @@ export const entityWithTemplateName = "entity"
 
 export function namespace(name: string) {
 	const parts = name.split(".")
-	if (parts.length <= 2)
-		return parts.length == 2 ? parts[0] : ""
-	parts.pop()
-	return parts.join(".")
+	return parts.length >= 2 ? parts[0] : ""
 }
 
 
 export function tail(name: string) {
 	const parts = name.split(".")
-	return parts[parts.length - 1]
+	if (parts.length <= 2)
+		return parts.length == 2 ? parts[1] : name
+	parts.shift()
+	return parts.join(".")
 }
 
 export interface BlkPosition {

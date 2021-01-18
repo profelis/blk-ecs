@@ -241,6 +241,8 @@ connection.onInitialized(() => {
 
 		const edit: WorkspaceEdit = { changes: {} }
 		for (const data of res) {
+			if (data.prefix && data.shortName != null)
+				continue
 			const uri = URI.file(data.filePath).toString()
 			if (!(uri in edit.changes))
 				edit.changes[uri] = []
@@ -250,11 +252,19 @@ connection.onInitialized(() => {
 				range.start.character = data.indent.end.column - 1
 			if (data.name.startsWith("\""))
 				range.start.character++
-			let headLen = namespace(data.name).length
-			if (headLen > 0)
-				headLen++
-			range.start.character += headLen
-			range.end.character = range.start.character + data.name.length - headLen
+			let endOffset = 0
+			if (data.prefix) {
+				const ns = data.name.endsWith(namespacePostfix) ? data.name.substr(1, data.name.length - namespacePostfix.length - 1) : data.name
+				endOffset = ns.length
+			}
+			else {
+				let nsLen = data.shortName != null ? 0 : namespace(data.name).length
+				if (nsLen > 0)
+					nsLen++
+				range.start.character += nsLen
+				endOffset = data.name.length - nsLen
+			}
+			range.end.character = range.start.character + endOffset
 			edit.changes[uri].push({ range: range, newText: params.newName })
 		}
 		return edit
@@ -267,14 +277,15 @@ connection.onInitialized(() => {
 
 		for (const blk of blkFile?.blocks ?? []) {
 			for (const param of blk?.params ?? [])
-				if (BlkLocation.isPosInLocation(param.location, params.position))
-					return { range: BlkLocation.toRange(param.location), placeholder: tail(param.value[0]) }
+				if (BlkLocation.isPosInLocation(param.location, params.position)) {
+					const name = paramName(param, params.position)
+					return { range: BlkLocation.toRange(param.location), placeholder: name.prefix ? name.name : tail(param.value[0]) }
+				}
 			for (const child of blk?.blocks ?? [])
-				if (BlkLocation.isPosInLocation(child.location, params.position))
-					if (!child.name.endsWith(namespacePostfix))
-						return { range: BlkLocation.toRange(child.location), placeholder: tail(child.name) }
-					else
-						return null
+				if (BlkLocation.isPosInLocation(child.location, params.position)) {
+					const name = blockName(child, params.position)
+					return { range: BlkLocation.toRange(child.location), placeholder: name.prefix ? name.name : tail(child.name) }
+				}
 			if (BlkLocation.isPosInLocation(blk.location, params.position))
 				return null
 		}
@@ -591,6 +602,8 @@ interface TemplatePos {
 	filePath: string
 	location: BlkLocation
 	indent?: BlkLocation
+	prefix?: boolean
+	shortName?: string
 }
 
 function getTemplates(name: string): TemplatePos[] {
@@ -670,7 +683,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 	if (param.include)
 		return {
 			include: param.include.value,
-			res: [{ name: param.include.value, filePath: findWSFile(param.include.value, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create() }],
+			res: [{ name: param.include.value, filePath: findWSFile(param.include.value, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create(), prefix: false }],
 		}
 	return { res: [] }
 }
@@ -691,7 +704,7 @@ function findAllReferences(name: string): TemplatePos[] {
 						const parts = splitAndRemoveQuotes(param.value[2])
 						for (const partName of parts) {
 							if (partName == name) {
-								res.push({ name: param?.shortName ?? name, filePath: filePath, location: param.location, indent: param.indent })
+								res.push({ name: param?.shortName ?? name, filePath: filePath, location: param.location, indent: param.indent, shortName: param.shortName })
 								break
 							}
 						}
@@ -704,19 +717,56 @@ function findAllReferences(name: string): TemplatePos[] {
 }
 
 function findAllTemplatesWithParam(name: string, type: string, prefix: boolean): TemplatePos[] {
+	const nameWithDot = prefix ? name + "." : name
+	const nameWithQuote = prefix ? '"' + name : name
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
 		for (const blk of blkFile?.blocks ?? []) {
 			for (const param of blk?.params ?? [])
-				if ((param.value?.length ?? 0) > 1 && ((prefix && param.value[0].startsWith(name)) || (!prefix && param.value[0] == name && param.value[1] == type)))
-					res.push({ name: param?.shortName ?? name, filePath: filePath, location: param.location, indent: param.indent })
-			if (type == "") {
+				if ((param.value?.length ?? 0) > 1 && ((prefix && param.value[0].startsWith(nameWithDot)) || (!prefix && param.value[0] == name && param.value[1] == type)))
+					res.push({ name: param?.shortName ?? name, filePath: filePath, location: param.location, indent: param.indent, prefix: prefix, shortName: param.shortName })
+			if (prefix || type.length == 0) {
 				for (const block of blk?.blocks ?? [])
-					if ((prefix && block.name.startsWith(name)) || (!prefix && block.name == name))
-						res.push({ name: name, filePath: filePath, location: block.location })
+					if ((prefix && (block.name.startsWith(nameWithDot) || (block.name.startsWith(nameWithQuote) && block.name.endsWith(namespacePostfix)))) || (!prefix && block.name == name))
+						res.push({ name: block.name, filePath: filePath, location: block.location, prefix: prefix })
 			}
 		}
 	return res
+}
+
+interface NameAtPosData {
+	name: string
+	prefix?: boolean
+	fullName: string
+}
+
+function paramName(param: BlkParam, position: Position): NameAtPosData {
+	const name = param.value[0]
+	const ns = namespace(name)
+	if (ns.length > 0) {
+		const offset = position.character - (param.indent ? param.indent.end.column : param.location.start.column) + 1
+		if (offset <= ns.length)
+			return { name: ns, fullName: name, prefix: true }
+	}
+	return { name: name, fullName: name }
+}
+
+function blockName(block: BlkBlock, position: Position): NameAtPosData {
+	let name = block.name
+	let prefix = false
+	if (name.endsWith(namespacePostfix)) {
+		name = name.substr(1, name.length - namespacePostfix.length - 1)
+		prefix = true
+	}
+	const ns = namespace(name)
+	if (ns.length > 0) {
+		const offset = position.character - block.location.start.column + 1
+		if (offset + (name.startsWith('"') ? 1 : 0) <= ns.length) {
+			name = ns
+			prefix = true
+		}
+	}
+	return { name: name, fullName: block.name, prefix: prefix }
 }
 
 function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Position): TemplatePos[] {
@@ -733,38 +783,16 @@ function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Posi
 		for (const param of blk?.params ?? []) {
 			if ((param.value?.length ?? 0) < 2 || !BlkLocation.isPosInLocation(param.location, position))
 				continue
-			let name = param.value[0]
-			const ns = namespace(name)
-			let prefix = false
-			if (ns.length > 0) {
-				const offset = position.character - (param.indent ? param.indent.end.column : param.location.start.column) + 1
-				if (offset <= ns.length) {
-					name = ns + "."
-					prefix = true
-				}
-			}
-			const res = findAllTemplatesWithParam(name, param.value[1], prefix)
+			const name = paramName(param, position)
+			const res = findAllTemplatesWithParam(name.prefix ? name.name : name.name, param.value[1], name.prefix ?? false)
 			if (res.length > 0)
 				return res
 		}
 		for (const block of blk?.blocks ?? []) {
 			if (!block.location || !BlkLocation.isPosInLocation(block.location, position))
 				continue
-			let name = block.name
-			let prefix = false
-			if (name.endsWith(namespacePostfix)) {
-				name = name.substr(1, name.length - namespacePostfix.length - 1) + "."
-				prefix = true
-			}
-			const ns = namespace(name)
-			if (ns.length > 0) {
-				const offset = position.character - block.location.start.column + 1
-				if (offset + (name.startsWith('"') ? 1 : 0) <= ns.length) {
-					name = ns + "."
-					prefix = true
-				}
-			}
-			const res = findAllTemplatesWithParam(name, "", prefix)
+			const name = blockName(block, position)
+			const res = findAllTemplatesWithParam(name.prefix ? name.name : name.name, "", name.prefix)
 			if (res.length > 0)
 				return res
 		}

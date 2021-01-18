@@ -11,7 +11,7 @@ Supported features:
 - find all templates with same parameter
 - autocompletion
 - diagnostics file structure
-- rename parameters
+- rename parameters/namespaces
 
 
 Especially thanks to [eguskov](https://github.com/eguskov) for his [blktool plugin](https://github.com/eguskov/blktool). Blk grammar syntax was taken from this plugin.
