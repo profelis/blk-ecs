@@ -703,16 +703,16 @@ function findAllReferences(name: string): TemplatePos[] {
 	return res
 }
 
-function findAllTemplatesWithParam(name: string, type: string): TemplatePos[] {
+function findAllTemplatesWithParam(name: string, type: string, prefix: boolean): TemplatePos[] {
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
 		for (const blk of blkFile?.blocks ?? []) {
 			for (const param of blk?.params ?? [])
-				if ((param.value?.length ?? 0) > 1 && param.value[0] == name && param.value[1] == type)
+				if ((param.value?.length ?? 0) > 1 && ((prefix && param.value[0].startsWith(name)) || (!prefix && param.value[0] == name && param.value[1] == type)))
 					res.push({ name: param?.shortName ?? name, filePath: filePath, location: param.location, indent: param.indent })
 			if (type == "") {
 				for (const block of blk?.blocks ?? [])
-					if (block.name == name)
+					if ((prefix && block.name.startsWith(name)) || (!prefix && block.name == name))
 						res.push({ name: name, filePath: filePath, location: block.location })
 			}
 		}
@@ -733,14 +733,38 @@ function findAllReferencesAt(filePath: string, blkFile: BlkBlock, position: Posi
 		for (const param of blk?.params ?? []) {
 			if ((param.value?.length ?? 0) < 2 || !BlkLocation.isPosInLocation(param.location, position))
 				continue
-			const res = findAllTemplatesWithParam(param.value[0], param.value[1])
+			let name = param.value[0]
+			const ns = namespace(name)
+			let prefix = false
+			if (ns.length > 0) {
+				const offset = position.character - (param.indent ? param.indent.end.column : param.location.start.column) + 1
+				if (offset <= ns.length) {
+					name = ns + "."
+					prefix = true
+				}
+			}
+			const res = findAllTemplatesWithParam(name, param.value[1], prefix)
 			if (res.length > 0)
 				return res
 		}
 		for (const block of blk?.blocks ?? []) {
 			if (!block.location || !BlkLocation.isPosInLocation(block.location, position))
 				continue
-			const res = findAllTemplatesWithParam(block.name, "")
+			let name = block.name
+			let prefix = false
+			if (name.endsWith(namespacePostfix)) {
+				name = name.substr(1, name.length - namespacePostfix.length - 1) + "."
+				prefix = true
+			}
+			const ns = namespace(name)
+			if (ns.length > 0) {
+				const offset = position.character - block.location.start.column + 1
+				if (offset + (name.startsWith('"') ? 1 : 0) <= ns.length) {
+					name = ns + "."
+					prefix = true
+				}
+			}
+			const res = findAllTemplatesWithParam(name, "", prefix)
 			if (res.length > 0)
 				return res
 		}
