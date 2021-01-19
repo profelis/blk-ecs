@@ -742,6 +742,8 @@ interface NameAtPosData {
 
 function paramName(param: BlkParam, position: Position): NameAtPosData {
 	const name = param.value[0]
+	if (param.shortName)
+		return { name: name, fullName: name }
 	const ns = namespace(name)
 	if (ns.length > 0) {
 		const offset = position.character - (param.indent ? param.indent.end.column : param.location.start.column) + 1
