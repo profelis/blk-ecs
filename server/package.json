@@ -1,7 +1,7 @@
 {
 	"name": "blk-ecs-server",
 	"description": "Blk tools for ECS framework",
-	"version": "0.0.4",
+	"version": "0.3.4",
 	"author": "Dmitri Granetchi",
 	"license": "MIT",
 	"engines": {

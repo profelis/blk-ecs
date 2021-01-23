@@ -57,6 +57,7 @@ function purgeFile(fsPath: string) {
 	completion.delete(fsPath)
 }
 
+const DOT_FIX = "_dot_"
 connection.onInitialized(() => {
 	connection.client.register(DidSaveTextDocumentNotification.type, undefined)
 	connection.client.register(DidCloseTextDocumentNotification.type, undefined)
@@ -120,10 +121,15 @@ connection.onInitialized(() => {
 				}
 			}
 
-		const scores = await extractAsPromised(params.query, data, { processor: (it) => it.name, limit: 100, cutoff: 20 })
+		const replaceDot = params.query.indexOf(DOT_FIX) >= 0
+		const query = replaceDot ? params.query.replace(DOT_FIX, ".") : params.query
+		const scores = await extractAsPromised(query, data, { processor: (it) => it.name, limit: 100, cutoff: 20 })
 		const res: SymbolInformation[] = []
 		for (const [it] of scores)
-			res.push(toSymbolInformation(it.name, it.location, URI.file(it.file).toString(), it.kind))
+		{
+			const name = replaceDot ? it.name.replace(".", DOT_FIX) : it.name
+			res.push(toSymbolInformation(name, it.location, URI.file(it.file).toString(), it.kind))
+		}
 		return res
 	})
 
