@@ -1,5 +1,5 @@
 import {
-	createConnection, ProposedFeatures, TextDocumentSyncKind, SymbolInformation, Position, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity, DidChangeWorkspaceFoldersNotification, CodeLens, SymbolKind, Range, WorkspaceEdit
+	createConnection, ProposedFeatures, TextDocumentSyncKind, SymbolInformation, Position, DidSaveTextDocumentNotification, MarkupKind, CompletionItem, CompletionItemKind, DidCloseTextDocumentNotification, Diagnostic, DiagnosticSeverity, DidChangeWorkspaceFoldersNotification, CodeLens, SymbolKind, WorkspaceEdit
 } from 'vscode-languageserver'
 
 import { parse } from './blk'
@@ -125,8 +125,7 @@ connection.onInitialized(() => {
 		const query = replaceDot ? params.query.replace(DOT_FIX, ".") : params.query
 		const scores = await extractAsPromised(query, data, { processor: (it) => it.name, limit: 100, cutoff: 20 })
 		const res: SymbolInformation[] = []
-		for (const [it] of scores)
-		{
+		for (const [it] of scores) {
 			const name = replaceDot ? it.name.replace(".", DOT_FIX) : it.name
 			res.push(toSymbolInformation(name, it.location, URI.file(it.file).toString(), it.kind))
 		}
@@ -324,6 +323,7 @@ function rescanOpenFiles() {
 
 function addWorkspaceUri(workspaceUri: string): void {
 	const fsPath = URI.parse(workspaceUri).fsPath
+	connection.window.showInformationMessage(`'${fsPath}' scanning...`)
 	connection.console.log(`> register workspace ${fsPath}`)
 	if (!workspaces.has(fsPath))
 		workspaces.add(fsPath)
@@ -331,6 +331,7 @@ function addWorkspaceUri(workspaceUri: string): void {
 	scanWorkspace(fsPath).finally(() => {
 		connection.console.log(`Total files: ${files.size}`)
 		rescanOpenFiles()
+		connection.window.showInformationMessage(`'${fsPath}' scan complete`)
 	})
 }
 
