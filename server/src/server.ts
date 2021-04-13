@@ -692,6 +692,13 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 			include: param.include.value,
 			res: [{ name: param.include.value, filePath: findWSFile(param.include.value, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create(), prefix: false }],
 		}
+	if (param.depth == 0 && (param.res?.value?.length ?? 0) >= 3 && param.res.value[0] == "import") {
+		const inc = removeQuotes(param.res.value[2])
+		return {
+			include: inc,
+			res: [{ name: inc, filePath: findWSFile(inc, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create(), prefix: false }],
+		}
+	}
 	return { res: [] }
 }
 
