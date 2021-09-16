@@ -8,7 +8,7 @@ import { extname, dirname } from 'path'
 import { URI } from 'vscode-uri'
 import { extractAsPromised } from 'fuzzball'
 import { findFile, walk } from './fsUtils'
-import { BlkBlock, BlkParam, BlkPosition, BlkLocation, BlkIncludes, toSymbolInformation, namespacePostfix, entityWithTemplateName, templateField, extendsField, tail, namespace, overrideField } from './blkBlock'
+import { BlkBlock, BlkParam, BlkPosition, BlkLocation, BlkIncludes, toSymbolInformation, namespacePostfix, entityWithTemplateName, templateField, extendsField, tail, namespace, overrideField, importField } from './blkBlock'
 
 const connection = createConnection(ProposedFeatures.all)
 
@@ -311,9 +311,9 @@ const openFiles: Set</*fsPath*/string> = new Set()
 const fileContents: Map</*fsPath*/string, string> = new Map() // content of changed files
 const files: Map</*fsPath*/string, BlkBlock> = new Map()
 
-const extendsInFiles: Map<string, Map<string, number>> = new Map()
+const extendsInFiles: Map</*fsPath*/string, Map</*template*/string, number>> = new Map()
+const entitiesInScenes: Map</*fsPath*/string, Map</*template*/string, number>> = new Map()
 let usagesInvalid = true
-const entitiesInScenes: Map<string, Map<string, number>> = new Map()
 const usagesMap: Map<string, number> = new Map()
 
 const completion: Map</*fsPath*/string, CompletionItem[]> = new Map()
@@ -324,6 +324,7 @@ function rescanOpenFiles() {
 	connection.console.log("> rescan open files")
 	for (const fsPath of openFiles.values())
 		scanFile(fsPath, null, true)
+	usagesInvalid = true
 }
 
 function addWorkspaceUri(workspaceUri: string): void {
@@ -357,11 +358,11 @@ function removeWorkspaceUri(workspaceUri: string): void {
 	else {
 		const removeFiles: string[] = []
 		for (const fsPath of openFiles.keys())
-			if (!isFileInWorkspaces(fsPath))
+			if (isFileInWorkspaces(fsPath))
 				removeFiles.push(fsPath)
 		for (const fsPath of removeFiles) {
 			connection.console.log(`> unregister file ${fsPath}`)
-			files.delete(fsPath)
+			purgeFile(fsPath)
 		}
 	}
 	rescanOpenFiles()
@@ -395,7 +396,9 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 		return
 
 	cleanupBlkBlock(blkFile)
+	completionCacheInvalid = true
 	completion.delete(fsPath)
+	usagesInvalid = true
 	extendsInFiles.delete(fsPath)
 	entitiesInScenes.delete(fsPath)
 
@@ -475,7 +478,6 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 		extendsInFiles.set(fsPath, extendsInFile)
 	if (entitiesInScene.size > 0)
 		entitiesInScenes.set(fsPath, entitiesInScene)
-	usagesInvalid = true
 }
 
 
@@ -665,7 +667,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 	const param = getParamAt(blkFile, position)
 	if (!param)
 		return { res: [] }
-	if (param.depth == 0 && (param.res?.value?.length ?? 0) >= 3 && param.res?.value[0] == "import" && param.res?.value[1] == "t") {
+	if (param.depth == 0 && (param.res?.value?.length ?? 0) >= 3 && param.res?.value[0] == importField && param.res?.value[1] == "t") {
 		const inc = removeQuotes(param.res.value[2])
 		return {
 			include: inc,
