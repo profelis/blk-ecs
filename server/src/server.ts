@@ -8,7 +8,7 @@ import { extname, dirname } from 'path'
 import { URI } from 'vscode-uri'
 import { extractAsPromised } from 'fuzzball'
 import { findFile, walk } from './fsUtils'
-import { BlkBlock, BlkParam, BlkLocation, BlkIncludes, toSymbolInformation, namespacePostfix, entityWithTemplateName, templateField, extendsField, tail, namespace } from './blkBlock'
+import { BlkBlock, BlkParam, BlkPosition, BlkLocation, BlkIncludes, toSymbolInformation, namespacePostfix, entityWithTemplateName, templateField, extendsField, tail, namespace, overrideField } from './blkBlock'
 
 const connection = createConnection(ProposedFeatures.all)
 
@@ -49,9 +49,8 @@ connection.onInitialize((params) => {
 function purgeFile(fsPath: string) {
 	fileContents.delete(fsPath)
 	files.delete(fsPath)
-	extendsCacheInvalid = true
+	usagesInvalid = true
 	extendsInFiles.delete(fsPath)
-	entitiesInScenesInvalid = true
 	entitiesInScenes.delete(fsPath)
 	completionCacheInvalid = true
 	completion.delete(fsPath)
@@ -207,20 +206,27 @@ connection.onInitialized(() => {
 		if (!blkFile)
 			return null
 
-		if (extendsCacheInvalid || entitiesInScenesInvalid)
+		if (usagesInvalid) {
 			usagesMap.clear()
+			usagesInvalid = false
 
-		if (extendsCacheInvalid) {
-			extendsCacheInvalid = false
 			for (const fileMap of extendsInFiles.values())
 				for (const [key, value] of fileMap)
 					usagesMap.set(key, (usagesMap.has(key) ? usagesMap.get(key) : 0) + value)
-		}
-		if (entitiesInScenesInvalid) {
-			entitiesInScenesInvalid = false
+
 			for (const fileMap of entitiesInScenes.values())
 				for (const [key, value] of fileMap)
 					usagesMap.set(key, (usagesMap.has(key) ? usagesMap.get(key) : 0) + value)
+
+			for (const [key, value] of usagesMap) {
+				let usages = -1
+				for (const blkFile of files.values()) {
+					for (const blk of blkFile?.blocks ?? [])
+						if (blk.name == key)
+							usages += 1
+				}
+				usagesMap.set(key, value + usages)
+			}
 		}
 
 		const res: CodeLens[] = []
@@ -306,9 +312,8 @@ const fileContents: Map</*fsPath*/string, string> = new Map() // content of chan
 const files: Map</*fsPath*/string, BlkBlock> = new Map()
 
 const extendsInFiles: Map<string, Map<string, number>> = new Map()
-let extendsCacheInvalid = true
+let usagesInvalid = true
 const entitiesInScenes: Map<string, Map<string, number>> = new Map()
-let entitiesInScenesInvalid = true
 const usagesMap: Map<string, number> = new Map()
 
 const completion: Map</*fsPath*/string, CompletionItem[]> = new Map()
@@ -468,10 +473,9 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 	}
 	if (extendsInFile.size > 0)
 		extendsInFiles.set(fsPath, extendsInFile)
-	extendsCacheInvalid = true
 	if (entitiesInScene.size > 0)
 		entitiesInScenes.set(fsPath, entitiesInScene)
-	entitiesInScenesInvalid = true
+	usagesInvalid = true
 }
 
 
@@ -650,6 +654,13 @@ function getParamAt(blkFile: BlkBlock, position: Position, depth = 0): { res: Bl
 	return null
 }
 
+function getRootBlock(blkFile: BlkBlock, loc: BlkLocation): BlkBlock {
+	for (const blk of blkFile?.blocks ?? [])
+		if (BlkPosition.less(blk.location.start, loc.start) && BlkPosition.less(loc.end, blk.location.end))
+			return blk
+	return null
+}
+
 function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyExtends = false): { res: TemplatePos[], name?: string, include?: string, error?: string } {
 	const param = getParamAt(blkFile, position)
 	if (!param)
@@ -659,6 +670,14 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 		return {
 			include: inc,
 			res: [{ name: inc, filePath: findWSFile(inc, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create(), prefix: false }],
+		}
+	}
+	if (param.depth == 1 && (param.res?.value?.length ?? 0) >= 3 && param.res?.value[0] == overrideField && param.res?.value[1] == "b") {
+		const root = getRootBlock(blkFile, param.res.location)
+		if (root) {
+			const res = getTemplates(root.name)
+			if (res.length > 0)
+				return { res: res, name: root.name }
 		}
 	}
 	if ((param.res?.value?.length ?? 0) >= 3
@@ -712,7 +731,7 @@ function findAllReferences(name: string): TemplatePos[] {
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
 		for (const blk of blkFile?.blocks ?? []) {
-			if (blk.name == entityWithTemplateName)
+			if (blk.name == entityWithTemplateName) {
 				for (const param of blk?.params ?? [])
 					if ((param.value?.length ?? 0) > 2 && param.value[0] == templateField && param.value[1] == "t") {
 						const parts = splitAndRemoveQuotes(param.value[2])
@@ -723,9 +742,14 @@ function findAllReferences(name: string): TemplatePos[] {
 							}
 						}
 					}
+			}
+			else if (blk.name == name) {
+				res.push({ name: name, filePath: filePath, location: blk.location })
+			}
 			for (const param of blk?.params ?? [])
 				if ((param.value?.length ?? 0) > 2 && param.value[0] == extendsField && param.value[1] == "t" && (param.value[2] == name || param.value[2] == longName))
 					res.push({ name: param?.shortName ?? name, filePath: filePath, location: param.location, indent: param.indent })
+
 		}
 	return res
 }

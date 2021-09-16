@@ -5,6 +5,7 @@ import {
 export const namespacePostfix = ":_namespace\""
 export const extendsField = "_extends"
 export const templateField = "_template"
+export const overrideField = "_override"
 
 export const entityWithTemplateName = "entity"
 
@@ -34,6 +35,9 @@ export class BlkPosition {
 	}
 	static toPosition(pos: BlkPosition) {
 		return Position.create(pos.line - 1, pos.column - 1)
+	}
+	static less(a: BlkPosition, b: BlkPosition) {
+		return a.line < b.line || (a.line == b.line && a.column < b.column)
 	}
 }
 
