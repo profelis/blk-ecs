@@ -52,6 +52,7 @@ function purgeFile(fsPath: string) {
 	usagesInvalid = true
 	extendsInFiles.delete(fsPath)
 	entitiesInScenes.delete(fsPath)
+	templatesInFiles.delete(fsPath)
 	completionCacheInvalid = true
 	completion.delete(fsPath)
 }
@@ -186,14 +187,16 @@ connection.onInitialized(() => {
 
 	connection.onCompletion(() => {
 		if (completionCacheInvalid) {
+			const start = Date.now()
 			completionCacheInvalid = false
 			const completionCacheMap: Map<string, CompletionItem> = new Map()
 			for (const file of completion.values())
 				for (const it of file)
-					completionCacheMap.set(it.label, it)
+					if (!completionCacheMap.has(it.label))
+						completionCacheMap.set(it.label, it)
 			completionCache = Array.from(completionCacheMap.values())
-			connection.console.log(`invalidate completion cache: ${completionCache.length} records in ${completion.size} files`)
 			completionCacheMap.clear()
+			connection.console.log(`invalidate completion cache: ${completionCache.length} records from ${completion.size} files in ${Date.now() - start}ms`)
 		}
 		connection.console.log(`completion: ${completionCache.length} records in ${completion.size} files`)
 		return completionCache
@@ -218,15 +221,9 @@ connection.onInitialized(() => {
 				for (const [key, value] of fileMap)
 					usagesMap.set(key, (usagesMap.has(key) ? usagesMap.get(key) : 0) + value)
 
-			for (const [key, value] of usagesMap) {
-				let usages = -1
-				for (const blkFile of files.values()) {
-					for (const blk of blkFile?.blocks ?? [])
-						if (blk.name == key)
-							usages += 1
-				}
-				usagesMap.set(key, value + usages)
-			}
+			for (const fileMap of templatesInFiles.values())
+				for (const [key, value] of fileMap)
+					usagesMap.set(key, (usagesMap.has(key) ? usagesMap.get(key) : 0) + value)
 		}
 
 		const res: CodeLens[] = []
@@ -313,6 +310,7 @@ const files: Map</*fsPath*/string, BlkBlock> = new Map()
 
 const extendsInFiles: Map</*fsPath*/string, Map</*template*/string, number>> = new Map()
 const entitiesInScenes: Map</*fsPath*/string, Map</*template*/string, number>> = new Map()
+const templatesInFiles: Map</*fsPath*/string, Map</*template*/string, number>> = new Map()
 let usagesInvalid = true
 const usagesMap: Map<string, number> = new Map()
 
@@ -401,9 +399,18 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 	usagesInvalid = true
 	extendsInFiles.delete(fsPath)
 	entitiesInScenes.delete(fsPath)
+	templatesInFiles.delete(fsPath)
 
 	const extendsInFile: Map<string, number> = new Map()
 	const entitiesInScene: Map<string, number> = new Map()
+	const templatesInFile: Map<string, number> = new Map()
+	if (blkFile?.blocks)
+		for (let i = 0; i < blkFile.blocks.length; i++)
+			for (let j = i + 1; j < blkFile.blocks.length; j++) {
+				const name = blkFile.blocks[i].name
+				if (blkFile.blocks[i].name == blkFile.blocks[j].name)
+					templatesInFile.set(blkFile.blocks[i].name, (templatesInFile.get(name) ?? 0) + 1)
+			}
 	for (const blk of blkFile?.blocks ?? []) {
 		if ((blk.blocks?.length ?? 0) > 0) {
 			for (const child of blk.blocks) {
@@ -478,6 +485,8 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 		extendsInFiles.set(fsPath, extendsInFile)
 	if (entitiesInScene.size > 0)
 		entitiesInScenes.set(fsPath, entitiesInScene)
+	if (templatesInFile.size > 0)
+		templatesInFiles.set(fsPath, templatesInFile)
 }
 
 
