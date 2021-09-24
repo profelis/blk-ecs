@@ -229,8 +229,10 @@ connection.onInitialized(() => {
 		const res: CodeLens[] = []
 		for (const blk of blkFile?.blocks ?? []) {
 			const name = removeQuotes(blk.name)
-			const count = usagesMap.has(name) ? usagesMap.get(name) : 0
-			res.push({ range: BlkLocation.toRange(blk.location), command: { title: `${count} usage${count == 1 ? "" : "s"}`, command: null } })
+			if (usagesMap.has(name)) {
+				const count = usagesMap.get(name)
+				res.push({ range: BlkLocation.toRange(blk.location), command: { title: `${count} usage${count == 1 ? "" : "s"}`, command: null } })
+			}
 		}
 		return res
 	})
@@ -408,7 +410,7 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 		for (let i = 0; i < blkFile.blocks.length; i++)
 			for (let j = i + 1; j < blkFile.blocks.length; j++) {
 				const name = blkFile.blocks[i].name
-				if (blkFile.blocks[i].name == blkFile.blocks[j].name)
+				if (name != entityWithTemplateName && blkFile.blocks[i].name == blkFile.blocks[j].name)
 					templatesInFile.set(blkFile.blocks[i].name, (templatesInFile.get(name) ?? 0) + 1)
 			}
 	for (const blk of blkFile?.blocks ?? []) {
