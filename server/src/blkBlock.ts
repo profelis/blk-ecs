@@ -2,27 +2,12 @@ import {
 	DocumentSymbol, Position, Range, SymbolInformation, SymbolKind
 } from 'vscode-languageserver'
 
-export const namespacePostfix = ":_namespace\""
 export const extendsField = "_extends"
 export const templateField = "_template"
 export const overrideField = "_override"
 export const importField = "import"
 
 export const entityWithTemplateName = "entity"
-
-export function namespace(name: string) {
-	const parts = name.split(".")
-	return parts.length >= 2 ? parts[0] : ""
-}
-
-
-export function tail(name: string) {
-	const parts = name.split(".")
-	if (parts.length <= 2)
-		return parts.length == 2 ? parts[1] : name
-	parts.shift()
-	return parts.join(".")
-}
 
 export interface BlkPosition {
 	offset: number
@@ -85,18 +70,21 @@ export interface BlkParam {
 	indent: BlkLocation
 	location: BlkLocation
 	value: string[]
-	shortName?: string
+
+	_name: string // value?[0]
+	_type: string // value?[1]
+	_value: string // value?[2]
 }
 
 export class BlkParam {
 	static toDocumentSymbol(param: BlkParam): DocumentSymbol {
 		const range = BlkLocation.toRange(param.location)
 		return {
-			name: param.value[0],
+			name: param._name,
 			kind: SymbolKind.Field,
 			range: range,
 			selectionRange: range,
-			detail: param.value.length > 2 ? param.value[2] : null,
+			detail: param._type && param._value ? `${param._type} = ${param._value}` : param._value ? param._value : param._type,
 		}
 	}
 }
@@ -121,21 +109,7 @@ export function toSymbolInformation(name: string, location: BlkLocation, uri: st
 
 export class BlkBlock {
 	static toDocumentSymbol(blk: BlkBlock): DocumentSymbol {
-		let children = blk.params ? blk.params.map(it => BlkParam.toDocumentSymbol(it)) : null
-		if (blk.blocks) {
-			children = children ?? []
-			for (const child of blk.blocks)
-				if (child.name && child.name.indexOf(":") == -1 && !child.name.endsWith(namespacePostfix)) {
-					const pos = BlkLocation.toRange(child.location)
-					children.push({
-						name: child.name,
-						kind: SymbolKind.Field,
-						range: pos,
-						selectionRange: pos,
-						detail: "{}",
-					})
-				}
-		}
+		const children = blk.params.map(it => BlkParam.toDocumentSymbol(it))
 		const range = BlkLocation.toRange(blk.location)
 		return {
 			name: blk.name,
