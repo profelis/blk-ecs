@@ -386,8 +386,6 @@ function cleanupBlkBlock(blk: BlkBlock, depth: number) {
 }
 
 function cleanupBlkParam(param: BlkParam, depth: number) {
-	if (depth > 2) // top level + template + _group
-		return
 	param._name = param.value.length > 0 ? removeQuotes(param.value[0]) : ""
 	param._type = param.value.length > 1 ? param.value[1] : ""
 	param._value = param.value.length > 2 ? param.value[2] : ""
@@ -697,7 +695,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 				return { res: res, name: root.name }
 		}
 	}
-	if (param.depth <= 2 && param.res && (param.res._value?.length ?? 0) > 0 && (!onlyExtends || (param.res._name == extendsField && param.res._type == "t"))) {
+	if (param.res && (param.res._value?.length ?? 0) > 0 && (!onlyExtends || (param.res._name == extendsField && param.res._type == "t"))) {
 		const startOffset = (param.res._name.length + param.res._type.length + param.res._value.length) - (param.res.location.end.column - 1 - position.character)
 		let name = removeQuotes(param.res._value)
 		if (startOffset > param.res._name.length) {
