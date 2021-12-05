@@ -137,7 +137,7 @@ connection.onInitialized(() => {
 			return null
 
 		const res = onDefinition(params.textDocument.uri, blkFile, params.position)
-		if (res.error || res.res.length == 0)
+		if (res.error || (res.res?.length ?? 0) == 0)
 			return null
 
 		return res.res.map(it => {
@@ -151,7 +151,7 @@ connection.onInitialized(() => {
 			return null
 
 		const res = onDefinition(params.textDocument.uri, blkFile, params.position, /*only extends*/true)
-		if (res.res.length == 0 && !res.error)
+		if ((res.res?.length ?? 0) == 0 && !res.include && !res.error)
 			return null
 
 		const text = res.error
