@@ -102,7 +102,7 @@ connection.onInitialized(() => {
 		const data: Array<{ file: string; location: BlkLocation, name: string, kind: SymbolKind }> = []
 		const usedParams = new Set<string>()
 		for (const [file, blkFile] of files)
-			for (const blk of blkFile.blocks) {
+			for (const blk of blkFile?.blocks) {
 				const key = blk.name
 				if (blk.name != entityWithTemplateName && !usedParams.has(key)) {
 					data.push({ file: file, name: key, location: blk.location, kind: SymbolKind.Struct })
@@ -497,6 +497,7 @@ function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic
 	if (!blkFile)
 		return
 
+	blkFile.blocks = blkFile.blocks ?? []
 	for (const blk of blkFile.blocks) {
 		if (blk.name == entityWithTemplateName)
 			for (const param of blk.params)
@@ -521,6 +522,7 @@ function validateFile(fsPath: string, blkFile: BlkBlock, diagnostics: Diagnostic
 					}
 				}
 
+		blk.params = blk.params ?? []
 		for (const param of blk.params) {
 			if (param._name == extendsField && param._type == "t" && param._value.length > 0) {
 				const parentName = removeQuotes(param._value)
@@ -630,7 +632,7 @@ interface TemplatePos {
 function getTemplates(name: string): TemplatePos[] {
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
-		for (const blk of blkFile.blocks)
+		for (const blk of blkFile?.blocks)
 			if (blk.name == name)
 				res.push({ name: blk.name, filePath: filePath, location: blk.location })
 	return res
@@ -739,7 +741,7 @@ function findAllReferences(name: string): TemplatePos[] {
 	const longName = `"${name}"`
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
-		for (const blk of blkFile.blocks) {
+		for (const blk of blkFile?.blocks) {
 			if (blk.name == entityWithTemplateName) {
 				for (const param of blk.params)
 					if (param._name == templateField && param._type == "t" && param._value.length > 0) {
@@ -766,7 +768,7 @@ function findAllReferences(name: string): TemplatePos[] {
 function findAllTemplatesWithParam(name: string, type: string): TemplatePos[] {
 	const res: TemplatePos[] = []
 	for (const [filePath, blkFile] of files)
-		for (const blk of blkFile.blocks) {
+		for (const blk of blkFile?.blocks) {
 			for (const param of blk.params)
 				if (param._name == name && param._type == type)
 					res.push({ name: name, filePath: filePath, location: param.location, indent: param.indent })
