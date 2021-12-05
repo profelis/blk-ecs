@@ -8,7 +8,7 @@ import { extname, dirname } from 'path'
 import { URI } from 'vscode-uri'
 import { extractAsPromised } from 'fuzzball'
 import { findFile, walk } from './fsUtils'
-import { BlkBlock, BlkParam, BlkPosition, BlkLocation, BlkIncludes, toSymbolInformation, entityWithTemplateName, templateField, extendsField, overrideField, importField } from './blkBlock'
+import { BlkBlock, BlkParam, BlkPosition, BlkLocation, BlkIncludes, toSymbolInformation, entityWithTemplateName, templateField, extendsField, overrideField, importField, groupBlock } from './blkBlock'
 
 const connection = createConnection(ProposedFeatures.all)
 
@@ -409,7 +409,7 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 		blk.params = blk.params ?? []
 
 		for (const child of blk.blocks) {
-			if (child.name == `"_group"`) {
+			if (child.name == groupBlock) {
 				for (const childParam of child.params) {
 					const newParam: BlkParam = {
 						indent: childParam.indent,
