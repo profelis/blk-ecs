@@ -70,7 +70,7 @@ export interface BlkIncludes {
 export interface BlkParam {
 	indent: BlkLocation
 	location: BlkLocation
-	value: string[]
+	value: string[] // [name, type, value]
 
 	_name: string // value?[0]
 	_type: string // value?[1]

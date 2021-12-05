@@ -372,20 +372,37 @@ function addCompletion(filePath: string, name: string, type: string, kind: Compl
 	if (!completion.has(filePath)) completion.set(filePath, [item]); else completion.get(filePath).push(item)
 }
 
-function cleanupBlkBlock(blk: BlkBlock) {
+function cleanupBlkBlock(blk: BlkBlock, depth: number) {
 	if (!blk)
 		return
-	blk.comments = null
-	blk.emptyLines = null
-	for (const it of blk?.blocks ?? [])
-		cleanupBlkBlock(it)
+	delete blk.comments
+	delete blk.emptyLines
+	blk.blocks = blk.blocks ?? []
+	for (const it of blk.blocks)
+	cleanupBlkBlock(it, depth + 1)
+	blk.params = blk.params ?? []
+	for (const it of blk.params)
+		cleanupBlkParam(it, depth)
+}
+
+function cleanupBlkParam(param: BlkParam, depth: number) {
+	if (depth > 2) // top level + template + _group
+		return
+	param._name = param.value.length > 0 ? removeQuotes(param.value[0]) : ""
+	param._type = param.value.length > 1 ? param.value[1] : ""
+	param._value = param.value.length > 2 ? param.value[2] : ""
+	if (param.value.length > 0 && param.value[0].startsWith("\"")) {
+		param.indent.end.column++
+		param.indent.end.offset++
+	}
+	delete param.value
 }
 
 function processFile(fsPath: string, blkFile: BlkBlock) {
 	if (!blkFile)
 		return
 
-	cleanupBlkBlock(blkFile)
+	cleanupBlkBlock(blkFile, 0)
 	completionCacheInvalid = true
 	completion.delete(fsPath)
 	usagesInvalid = true
@@ -396,7 +413,6 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 	const extendsInFile: Map<string, number> = new Map()
 	const entitiesInScene: Map<string, number> = new Map()
 	const templatesInFile: Map<string, number> = new Map()
-	blkFile.blocks = blkFile.blocks ?? []
 
 	for (let i = 0; i < blkFile.blocks.length; i++)
 		for (let j = i + 1; j < blkFile.blocks.length; j++) {
@@ -405,19 +421,16 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 				templatesInFile.set(name, (templatesInFile.get(name) ?? 0) + 1)
 		}
 	for (const blk of blkFile.blocks) {
-		blk.blocks = blk.blocks ?? []
-		blk.params = blk.params ?? []
-
 		for (const child of blk.blocks) {
 			if (child.name == groupBlock) {
 				for (const childParam of child.params) {
 					const newParam: BlkParam = {
 						indent: childParam.indent,
 						location: childParam.location,
-						value: childParam.value.concat([]),
-						_name: childParam.value.length > 0 ? removeQuotes(childParam.value[0]) : "",
-						_type: childParam.value.length > 1 ? childParam.value[1] : "",
-						_value: childParam.value.length > 2 ? childParam.value[2] : "",
+						value: null,
+						_name: childParam._name,
+						_type: childParam._type,
+						_value: childParam._value,
 					}
 					blk.params.push(newParam)
 					addCompletion(fsPath, newParam._name, newParam._type, CompletionItemKind.Field)
@@ -432,10 +445,10 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 					const newParam: BlkParam = {
 						indent: indent,
 						location: childBlock.location,
-						value: parts,
+						value: null,
 						_name: parts.length > 0 ? parts[0] : "",
 						_type: parts.length > 1 ? parts[1] : "",
-						_value: parts.length > 2 ? parts[2] : "",
+						_value: "",
 					}
 					blk.params.push(newParam)
 					addCompletion(fsPath, newParam._name, newParam._type, CompletionItemKind.Field)
@@ -450,10 +463,10 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 				const newParam: BlkParam = {
 					indent: indent,
 					location: child.location,
-					value: parts,
+					value: null,
 					_name: parts.length > 0 ? parts[0] : "",
 					_type: parts.length > 1 ? parts[1] : "",
-					_value: parts.length > 2 ? parts[2] : "",
+					_value: "",
 				}
 				blk.params.push(newParam)
 				addCompletion(fsPath, newParam._name, newParam._type, CompletionItemKind.Field)
@@ -461,15 +474,7 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 		}
 		addCompletion(fsPath, blk.name, "", CompletionItemKind.Struct)
 
-		blk.params = blk.params ?? []
 		for (const param of blk.params) {
-			param._name = param.value.length > 0 ? removeQuotes(param.value[0]) : ""
-			param._type = param.value.length > 1 ? param.value[1] : ""
-			param._value = param.value.length > 2 ? param.value[2] : ""
-			if (param.value.length > 0 && param.value[0].startsWith("\"")) {
-				param.indent.end.column++
-				param.indent.end.offset++
-			}
 			if (param._name == extendsField && param._type == "t" && param._value.length > 0) {
 				const parentName = removeQuotes(param._value)
 				extendsInFile.set(parentName, extendsInFile.has(parentName) ? extendsInFile.get(parentName) + 1 : 1)
@@ -692,7 +697,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 				return { res: res, name: root.name }
 		}
 	}
-	if (param.depth == 1 && param.res && (param.res._value?.length ?? 0) > 0 && (!onlyExtends || (param.res._name == extendsField && param.res._type == "t"))) {
+	if (param.depth <= 2 && param.res && (param.res._value?.length ?? 0) > 0 && (!onlyExtends || (param.res._name == extendsField && param.res._type == "t"))) {
 		const startOffset = (param.res._name.length + param.res._type.length + param.res._value.length) - (param.res.location.end.column - 1 - position.character)
 		let name = removeQuotes(param.res._value)
 		if (startOffset > param.res._name.length) {
