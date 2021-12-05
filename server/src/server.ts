@@ -677,7 +677,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 	const param = getParamAt(blkFile, position)
 	if (!param)
 		return { res: [] }
-	if (param.depth == 0 && param.res && param.res._name == importField && param.res._type == "t" && param.res._value.length > 0) {
+	if (param.depth == 0 && param.res && param.res._name == importField && param.res._type == "t" && (param.res._value?.length ?? 0) > 0) {
 		const inc = removeQuotes(param.res._value)
 		return {
 			include: inc,
@@ -692,7 +692,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 				return { res: res, name: root.name }
 		}
 	}
-	if (param.res && param.res._value.length > 0 && (!onlyExtends || (param.depth == 1 && param.res._name == extendsField && param.res._type == "t"))) {
+	if (param.depth == 1 && param.res && (param.res._value?.length ?? 0) > 0 && (!onlyExtends || (param.res._name == extendsField && param.res._type == "t"))) {
 		const startOffset = (param.res._name.length + param.res._type.length + param.res._value.length) - (param.res.location.end.column - 1 - position.character)
 		let name = removeQuotes(param.res._value)
 		if (startOffset > param.res._name.length) {
