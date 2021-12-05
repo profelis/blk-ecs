@@ -33,6 +33,9 @@ export interface BlkLocation {
 	end: BlkPosition
 }
 export class BlkLocation {
+	static clone(loc: BlkLocation): BlkLocation {
+		return BlkLocation.create(loc.start, loc.end)
+	}
 	static create(start: BlkPosition = null, end: BlkPosition = null): BlkLocation {
 		return {
 			start: start ? BlkPosition.create(start.line, start.column, start.offset) : BlkPosition.create(),

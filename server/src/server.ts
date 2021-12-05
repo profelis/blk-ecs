@@ -379,7 +379,7 @@ function cleanupBlkBlock(blk: BlkBlock, depth: number) {
 	delete blk.emptyLines
 	blk.blocks = blk.blocks ?? []
 	for (const it of blk.blocks)
-	cleanupBlkBlock(it, depth + 1)
+		cleanupBlkBlock(it, depth + 1)
 	blk.params = blk.params ?? []
 	for (const it of blk.params)
 		cleanupBlkParam(it, depth)
@@ -389,7 +389,7 @@ function cleanupBlkParam(param: BlkParam, depth: number) {
 	param._name = param.value.length > 0 ? removeQuotes(param.value[0]) : ""
 	param._type = param.value.length > 1 ? param.value[1] : ""
 	param._value = param.value.length > 2 ? param.value[2] : ""
-	if (param.value.length > 0 && param.value[0].startsWith("\"")) {
+	if (param.value.length > 0 && param.value[0].startsWith(`"`)) {
 		param.indent.end.column++
 		param.indent.end.offset++
 	}
@@ -423,48 +423,50 @@ function processFile(fsPath: string, blkFile: BlkBlock) {
 			if (child.name == groupBlock) {
 				for (const childParam of child.params) {
 					const newParam: BlkParam = {
-						indent: childParam.indent,
+						indent: BlkLocation.clone(childParam.indent),
 						location: childParam.location,
 						value: null,
 						_name: childParam._name,
 						_type: childParam._type,
 						_value: childParam._value,
 					}
+					if (newParam._name.startsWith(`"`)) {
+						newParam.indent.end.column++
+						newParam.indent.end.offset++
+					}
 					blk.params.push(newParam)
 					addCompletion(fsPath, newParam._name, newParam._type, CompletionItemKind.Field)
 				}
 				for (const childBlock of child.blocks) {
 					const parts = removeQuotes(childBlock.name).split(":").map(it => it.trim())
-					const indent = BlkLocation.create(childBlock.location.start, childBlock.location.start)
-					if (childBlock.name.startsWith("\"")) {
-						indent.end.column++
-						indent.end.offset++
-					}
 					const newParam: BlkParam = {
-						indent: indent,
+						indent: BlkLocation.create(childBlock.location.start, childBlock.location.start),
 						location: childBlock.location,
 						value: null,
 						_name: parts.length > 0 ? parts[0] : "",
 						_type: parts.length > 1 ? parts[1] : "",
 						_value: "",
 					}
+					if (childBlock.name.startsWith(`"`)) {
+						newParam.indent.end.column++
+						newParam.indent.end.offset++
+					}
 					blk.params.push(newParam)
 					addCompletion(fsPath, newParam._name, newParam._type, CompletionItemKind.Field)
 				}
 			} else {
 				const parts = removeQuotes(child.name).split(":").map(it => it.trim())
-				const indent = BlkLocation.create(child.location.start, child.location.start)
-				if (child.name.startsWith("\"")) {
-					indent.end.column++
-					indent.end.offset++
-				}
 				const newParam: BlkParam = {
-					indent: indent,
+					indent: BlkLocation.create(child.location.start, child.location.start),
 					location: child.location,
 					value: null,
 					_name: parts.length > 0 ? parts[0] : "",
 					_type: parts.length > 1 ? parts[1] : "",
 					_value: "",
+				}
+				if (child.name.startsWith(`"`)) {
+					newParam.indent.end.column++
+					newParam.indent.end.offset++
 				}
 				blk.params.push(newParam)
 				addCompletion(fsPath, newParam._name, newParam._type, CompletionItemKind.Field)
