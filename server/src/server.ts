@@ -319,7 +319,7 @@ function rescanOpenFiles() {
 
 function addWorkspaceUri(workspaceUri: string): void {
 	const fsPath = URI.parse(workspaceUri).fsPath
-	connection.window.showInformationMessage(`'${fsPath}' scanning...`)
+	// connection.window.showInformationMessage(`'${fsPath}' scanning...`)
 	connection.console.log(`> register workspace ${fsPath}`)
 	if (!workspaces.has(fsPath))
 		workspaces.add(fsPath)
@@ -327,7 +327,7 @@ function addWorkspaceUri(workspaceUri: string): void {
 	scanWorkspace(fsPath).finally(() => {
 		connection.console.log(`Total files: ${files.size}`)
 		rescanOpenFiles()
-		connection.window.showInformationMessage(`'${fsPath}' scan complete`)
+		// connection.window.showInformationMessage(`'${fsPath}' scan complete`)
 	})
 }
 
