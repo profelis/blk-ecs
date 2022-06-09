@@ -6,6 +6,7 @@ export const extendsField = "_extends"
 export const templateField = "_template"
 export const overrideField = "_override"
 export const importField = "import"
+export const importSceneField = "scene"
 export const groupBlock = "_group"
 
 export const entityWithTemplateName = "entity"

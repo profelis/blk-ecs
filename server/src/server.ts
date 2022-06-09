@@ -8,7 +8,7 @@ import { extname, dirname } from 'path'
 import { URI } from 'vscode-uri'
 import { extractAsPromised } from 'fuzzball'
 import { findFile, walk } from './fsUtils'
-import { BlkBlock, BlkParam, BlkPosition, BlkLocation, BlkIncludes, toSymbolInformation, entityWithTemplateName, templateField, extendsField, overrideField, importField, groupBlock } from './blkBlock'
+import { BlkBlock, BlkParam, BlkPosition, BlkLocation, BlkIncludes, toSymbolInformation, entityWithTemplateName, templateField, extendsField, overrideField, importField, groupBlock, importSceneField } from './blkBlock'
 
 const connection = createConnection(ProposedFeatures.all)
 
@@ -653,21 +653,21 @@ function removeQuotes(str: string): string {
 	return str
 }
 
-function getParamAt(blkFile: BlkBlock, position: Position, depth = 0): { res: BlkParam, include: BlkIncludes, depth: number } {
+function getParamAt(blkFile: BlkBlock, position: Position, depth = 0, parent: BlkBlock = null): { res: BlkParam, include: BlkIncludes, depth: number, parent?: BlkBlock } {
 	for (const blk of blkFile.blocks) {
 		if (BlkLocation.isPosInLocation(blk.location, position))
-			return getParamAt(blk, position, ++depth)
+			return getParamAt(blk, position, ++depth, blk)
 		for (const include of blk?.includes)
 			if (BlkLocation.isPosInLocation(include.location, position))
-				return { res: null, include: include, depth: depth }
+				return { res: null, include: include, depth: depth, parent: parent }
 	}
 	for (const param of blkFile.params)
 		if (BlkLocation.isPosInLocation(param.location, position))
-			return { res: param, include: null, depth: depth }
+			return { res: param, include: null, depth: depth, parent: parent }
 
 	for (const include of blkFile.includes)
 		if (BlkLocation.isPosInLocation(include.location, position))
-			return { res: null, include: include, depth: depth }
+			return { res: null, include: include, depth: depth, parent: parent }
 	return null
 }
 
@@ -683,6 +683,13 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 	if (!param)
 		return { res: [] }
 	if (param.depth == 0 && param.res && param.res._name == importField && param.res._type == "t" && (param.res._value?.length ?? 0) > 0) {
+		const inc = removeQuotes(param.res._value)
+		return {
+			include: inc,
+			res: [{ name: inc, filePath: findWSFile(inc, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create() }],
+		}
+	}
+	if (param.res && param.res._name == importSceneField && param.res._type == "t" && param.parent && param.parent.name == importField) {
 		const inc = removeQuotes(param.res._value)
 		return {
 			include: inc,
