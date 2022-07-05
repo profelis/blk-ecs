@@ -20,19 +20,27 @@ export function walk(dir: string, iter: (err: NodeJS.ErrnoException, path: strin
 	)
 }
 
-export function findFile(path: string, cwd: string, folders: string[]) {
+export function findFile(path: string, cwd: string, folders: IterableIterator<string>, relativePath: boolean, openFiles: IterableIterator<string>): string[] {
 	path = (path || "").trim()
 	if (path.length == 0 || isAbsolute(path))
-		return path
+		return [path]
 
 	const res = resolve(cwd, path)
 	if ((path.startsWith(".") && !path.startsWith("..")) || existsSync(res))
-		return res
+		return [res]
 
 	for (const it of folders) {
 		const res = resolve(it, path)
 		if (existsSync(res))
-			return res
+			return [res]
 	}
-	return path
+	if (!relativePath)
+		return []
+
+	let paths = new Array<string>()
+	for (const openPath of openFiles) {
+		if (openPath.indexOf(path) >= 0)
+			paths.push(openPath)
+	}
+	return paths
 }

@@ -151,7 +151,7 @@ connection.onInitialized(() => {
 			return null
 
 		const res = onDefinition(params.textDocument.uri, blkFile, params.position, /*only extends*/true)
-		if ((res.res?.length ?? 0) == 0 && !res.include && !res.error)
+		if ((res.res?.length ?? 0) == 0 && !res.error)
 			return null
 
 		const text = res.error
@@ -684,16 +684,18 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 		return { res: [] }
 	if (param.depth == 0 && param.res && param.res._name == importField && param.res._type == "t" && (param.res._value?.length ?? 0) > 0) {
 		const inc = removeQuotes(param.res._value)
+		const paths = findWSFile(inc, dirname(URI.parse(uri).fsPath))
 		return {
 			include: inc,
-			res: [{ name: inc, filePath: findWSFile(inc, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create() }],
+			res: paths.map(it => { return { name: inc, filePath: it, location: BlkLocation.create() } }),
 		}
 	}
 	if (param.res && param.res._name == importSceneField && param.res._type == "t" && param.parent && param.parent.name == importField) {
 		const inc = removeQuotes(param.res._value)
+		const paths = findWSFile(inc, dirname(URI.parse(uri).fsPath))
 		return {
 			include: inc,
-			res: [{ name: inc, filePath: findWSFile(inc, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create() }],
+			res: paths.map(it => { return { name: inc, filePath: it, location: BlkLocation.create() } }),
 		}
 	}
 	if (param.depth == 1 && param.res && param.res._name == overrideField && param.res._type == "b") {
@@ -736,17 +738,20 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 		}
 		return { res: [], error: `#undefined template '${name}'` }
 	}
-	if (param.include)
+	if (param.include) {
+		const paths = findWSFile(param.include.value, dirname(URI.parse(uri).fsPath))
 		return {
 			include: param.include.value,
-			res: [{ name: param.include.value, filePath: findWSFile(param.include.value, dirname(URI.parse(uri).fsPath)), location: BlkLocation.create() }],
+			res: paths.map(it => { return { name: param.include.value, filePath: it, location: BlkLocation.create() } }),
 		}
+	}
 	return { res: [] }
 }
 
-function findWSFile(path: string, cwd: string) {
-	path = path.startsWith("#") ? path.substr(1) : path
-	return findFile(path, cwd, Array.from(workspaces.values()))
+function findWSFile(path: string, cwd: string): string[] {
+	const relativePath = path.startsWith("#")
+	path = relativePath ? path.substring(1) : path
+	return findFile(path, cwd, workspaces.values(), relativePath, files.keys())
 }
 
 function findAllReferences(name: string): TemplatePos[] {
