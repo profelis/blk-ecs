@@ -682,6 +682,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 	const param = getParamAt(blkFile, position)
 	if (!param)
 		return { res: [] }
+	// import:t=...
 	if (param.depth == 0 && param.res && param.res._name == importField && param.res._type == "t" && (param.res._value?.length ?? 0) > 0) {
 		const inc = removeQuotes(param.res._value)
 		const paths = findWSFile(inc, dirname(URI.parse(uri).fsPath))
@@ -690,6 +691,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 			res: paths.map(it => { return { name: inc, filePath: it, location: BlkLocation.create() } }),
 		}
 	}
+	// scene { import:t=... }
 	if (param.res && param.res._name == importSceneField && param.res._type == "t" && param.parent && param.parent.name == importField) {
 		const inc = removeQuotes(param.res._value)
 		const paths = findWSFile(inc, dirname(URI.parse(uri).fsPath))
@@ -698,6 +700,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 			res: paths.map(it => { return { name: inc, filePath: it, location: BlkLocation.create() } }),
 		}
 	}
+	// _override:b=
 	if (param.depth == 1 && param.res && param.res._name == overrideField && param.res._type == "b") {
 		const root = getRootBlock(blkFile, param.res.location)
 		if (root) {
@@ -706,6 +709,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 				return { res: res, name: root.name }
 		}
 	}
+	// _extends:t=...
 	if (param.res && (param.res._value?.length ?? 0) > 0 && (!onlyExtends || (param.res._name == extendsField && param.res._type == "t"))) {
 		const startOffset = (param.res._name.length + param.res._type.length + param.res._value.length) - (param.res.location.end.column - 1 - position.character)
 		let name = removeQuotes(param.res._value)
