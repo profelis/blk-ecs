@@ -34,8 +34,8 @@ export function findFile(path: string, cwd: string, folders: IterableIterator<st
 		if (existsSync(res))
 			return [res]
 	}
-	if (!relativePath)
-		return []
+	if (!relativePath && path.indexOf("/") == -1 && path.indexOf("\\") == -1)
+		return [path]
 
 	let paths = new Array<string>()
 	for (const openPath of openFiles) {
