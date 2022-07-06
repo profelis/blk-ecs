@@ -753,9 +753,15 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 }
 
 function findWSFile(path: string, cwd: string): string[] {
-	const relativePath = path.startsWith("#")
+	const relativePath = path.startsWith("#") || path.startsWith("%")
 	path = relativePath ? path.substring(1) : path
-	return findFile(path, cwd, workspaces.values(), relativePath, files.keys())
+	const res = findFile(path, cwd, workspaces.values(), relativePath, files.keys())
+	if (res.length == 0 && relativePath) {
+		let idx = path.replace(/\//g, "\\").indexOf("\\")
+		if (idx >= 0)
+			return findFile(path.substring(idx + 1), cwd, workspaces.values(), relativePath, files.keys())
+	}
+	return res
 }
 
 function findAllReferences(name: string): TemplatePos[] {

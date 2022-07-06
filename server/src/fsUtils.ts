@@ -38,10 +38,10 @@ export function findFile(path: string, cwd: string, folders: IterableIterator<st
 		return [path]
 
 	let paths = new Array<string>()
-	let unixPath = path.replace("\\\\", "/").replace("\\", "/")
-	let winPath = path.replace("/", "\\")
+	let unixPath = path.replace(/\\\\/g, "/").replace(/\\/g, "/")
+	let winPath = path.replace(/\//g, "\\")
 	for (const openPath of openFiles) {
-		if (openPath.indexOf(unixPath) >= 0 || openPath.indexOf(winPath) >= 0)
+		if (openPath.endsWith(unixPath) || openPath.endsWith(winPath))
 			paths.push(openPath)
 	}
 	return paths
