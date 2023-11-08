@@ -709,7 +709,7 @@ function onDefinition(uri: string, blkFile: BlkBlock, position: Position, onlyEx
 				return { res: res, name: root.name }
 		}
 	}
-	// _extends:t=...
+	// _extends:t=... -> _use:t=...
 	if (param.res && (param.res._value?.length ?? 0) > 0 && (!onlyExtends || (param.res._name == extendsField && param.res._type == "t"))) {
 		const startOffset = (param.res._name.length + param.res._type.length + param.res._value.length) - (param.res.location.end.column - 1 - position.character)
 		let name = removeQuotes(param.res._value)

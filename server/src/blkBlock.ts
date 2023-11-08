@@ -2,7 +2,7 @@ import {
 	DocumentSymbol, Position, Range, SymbolInformation, SymbolKind
 } from 'vscode-languageserver'
 
-export const extendsField = "_extends"
+export const extendsField = "_use"
 export const templateField = "_template"
 export const overrideField = "_override"
 export const importField = "import"
